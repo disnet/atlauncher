@@ -10,13 +10,15 @@ import {
   collectionOf,
   handlesCollection,
   type AccountRef,
+  type ActionDecl,
   type AtUri,
   type Did,
+  type Item,
   type OpenMessage,
   type ShellToApp,
 } from '../../protocol/messages.ts'
-import { APP_ORIGIN } from '../../lib/config.ts'
-import { pickFrame, unreadByAccount } from './workspace.ts'
+import { APP_ORIGIN, MOCK_ORIGINS } from '../../lib/config.ts'
+import { actionsFor, pickFrame, unreadByAccount } from './workspace.ts'
 
 interface Account extends AccountRef {
   displayName?: string
@@ -37,6 +39,8 @@ interface Frame {
   restore: Did | null
   /** Collections the app said it can show. */
   handles: string[]
+  /** What the app can do with items from other apps. */
+  actions: ActionDecl[]
   unread: Map<Did, number>
   /** An `open` to deliver once the frame has said `hello`. */
   queuedOpen: OpenMessage | null
@@ -146,17 +150,13 @@ function openFrame(url: string, restore: Did | null = null, id = crypto.randomUU
     pending: null,
     restore,
     handles: [],
+    actions: [],
     unread: new Map(),
     queuedOpen: null,
     ready: false,
   }
   iframe.src = url
-  $<HTMLButtonElement>('.close', el).addEventListener('click', () => {
-    frames.delete(id)
-    el.remove()
-    saveFrames()
-    renderAccounts()
-  })
+  $<HTMLButtonElement>('.close', el).addEventListener('click', () => closeFrame(frame))
   $<HTMLSelectElement>('.account-select', el).addEventListener('change', (e) => {
     const did = (e.target as HTMLSelectElement).value as Did
     const a = accounts.find((x) => x.did === did)
@@ -167,6 +167,14 @@ function openFrame(url: string, restore: Did | null = null, id = crypto.randomUU
   renderFrame(frame)
   saveFrames()
   return frame
+}
+
+function closeFrame(f: Frame) {
+  frames.delete(f.id)
+  f.el.remove()
+  if (focus?.from === f) setFocus(f, null)
+  saveFrames()
+  renderAccounts()
 }
 
 function renderFrame(f: Frame) {
@@ -234,12 +242,7 @@ function routeOpen(uri: AtUri, did: Did | undefined, from: Frame) {
   if (target.ready) send(target, msg)
   else target.queuedOpen = msg
   renderFrame(target)
-  if (target !== from) {
-    target.el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
-    target.el.classList.remove('flash')
-    void target.el.offsetWidth // restart the animation
-    target.el.classList.add('flash')
-  }
+  if (target !== from) flash(target)
 }
 
 function notice(message: string, f: Frame) {
@@ -247,6 +250,125 @@ function notice(message: string, f: Frame) {
   n.textContent = message
   n.hidden = false
   setTimeout(() => (n.hidden = true), 5000)
+}
+
+// ---- shared actions ---------------------------------------------------------
+
+/**
+ * Offer `item` from frame `from` to the other apps' actions: a sheet lists
+ * the actions that accept it, and the chosen app gets `perform`.
+ */
+function offerItem(item: Item, did: Did | undefined, from: Frame) {
+  const options = actionsFor([...frames.values()], item, from.origin)
+  const dialog = $<HTMLDialogElement>('#act-sheet')
+  $<HTMLElement>('.act-title', dialog).textContent = item.title
+  $<HTMLElement>('.act-text', dialog).textContent = item.text ?? ''
+  const list = $<HTMLUListElement>('.act-options', dialog)
+  list.replaceChildren()
+  if (!options.length) list.append(text('li', 'No app in this workspace takes this.', 'hint'))
+  for (const { frame, action } of options) {
+    const li = document.createElement('li')
+    const b = document.createElement('button')
+    b.append(text('span', action.label), text('span', frame.appName, 'act-app'))
+    b.addEventListener('click', () => {
+      dialog.close()
+      perform(frame, action.id, item, did)
+    })
+    li.append(b)
+    list.append(li)
+  }
+  dialog.showModal()
+}
+
+function perform(target: Frame, action: string, item: Item, did: Did | undefined) {
+  // Act as the account the user was using, with the same rules as `switch`.
+  const account = did && accounts.find((a) => a.did === did)
+  send(target, {
+    proto: PROTO,
+    type: 'perform',
+    action,
+    item,
+    ...(account ? { account: { did: account.did, handle: account.handle } } : {}),
+  })
+  if (account && target.active !== account.did) target.pending = account.did
+  renderFrame(target)
+  flash(target)
+  // An action usually adds something "about" the focused item (a note, a
+  // message), so ask again once the app has had a moment to save it.
+  setTimeout(queryContext, 400)
+}
+
+// ---- what links here ---------------------------------------------------------
+
+interface Focus {
+  from: Frame
+  item: Item
+  query: string
+  /** Answers per app origin, so two frames of one app count once. */
+  answers: Map<string, { appName: string; frame: Frame; items: Item[] }>
+}
+let focus: Focus | null = null
+
+function setFocus(from: Frame, item: Item | null) {
+  if (!item) {
+    if (focus?.from === from) focus = null
+    renderContext()
+    return
+  }
+  focus = { from, item, query: '', answers: new Map() }
+  queryContext()
+}
+
+/** Ask every other app what it has about the focused item. */
+function queryContext() {
+  if (!focus) return
+  focus.query = crypto.randomUUID()
+  focus.answers.clear()
+  for (const f of frames.values()) {
+    if (f.origin === focus.from.origin || !f.ready) continue
+    send(f, {
+      proto: PROTO,
+      type: 'context-query',
+      query: focus.query,
+      item: focus.item,
+      ...(f.active ? { did: f.active } : {}),
+    })
+  }
+  renderContext()
+}
+
+function renderContext() {
+  const section = $<HTMLElement>('#context')
+  section.hidden = !focus
+  if (!focus) return
+  $<HTMLElement>('.context-title', section).textContent = focus.item.title
+  const list = $<HTMLUListElement>('.context-items', section)
+  list.replaceChildren()
+  const answers = [...focus.answers.values()].filter((a) => a.items.length)
+  if (!answers.length) list.append(text('li', 'Nothing in the other apps yet.', 'hint'))
+  for (const { appName, frame, items } of answers) {
+    list.append(text('li', appName, 'context-app'))
+    for (const item of items) {
+      const li = document.createElement('li')
+      const b = document.createElement('button')
+      b.className = 'context-item'
+      b.append(text('span', item.title, 'context-item-title'))
+      if (item.text) b.append(text('span', item.text, 'context-item-text'))
+      b.addEventListener('click', () => {
+        if (item.uri) routeOpen(item.uri, frame.active ?? undefined, frame)
+        else if (item.url) window.open(item.url, '_blank', 'noopener')
+      })
+      li.append(b)
+      list.append(li)
+    }
+  }
+}
+
+function flash(target: Frame) {
+  target.el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
+  target.el.classList.remove('flash')
+  void target.el.offsetWidth // restart the animation
+  target.el.classList.add('flash')
 }
 
 function switchFrame(f: Frame, a: Account) {
@@ -266,6 +388,7 @@ window.addEventListener('message', (event) => {
       frame.sessions = msg.sessions
       frame.active = msg.active
       frame.handles = msg.handles ?? []
+      frame.actions = msg.actions ?? []
       frame.ready = true
       rememberApp({ url: frame.url, name: msg.app.name, handles: frame.handles })
       // Frames of one app share storage, so the app's own "active" is
@@ -278,14 +401,19 @@ window.addEventListener('message', (event) => {
         send(frame, frame.queuedOpen)
         frame.queuedOpen = null
       }
+      queryContext()
       break
     }
-    case 'state':
+    case 'state': {
+      const switched = frame.active !== msg.active
       frame.sessions = msg.sessions
       frame.active = msg.active
       if (frame.pending === msg.active) frame.pending = null
       saveFrames()
+      // Another account has other things to say about the focused item.
+      if (switched && focus && focus.from !== frame) queryContext()
       break
+    }
     case 'needs-sign-in':
       frame.pending = msg.did
       break
@@ -295,6 +423,18 @@ window.addEventListener('message', (event) => {
       break
     case 'open':
       routeOpen(msg.uri, msg.did, frame)
+      break
+    case 'act':
+      offerItem(msg.item, msg.did, frame)
+      break
+    case 'focus':
+      setFocus(frame, msg.item)
+      break
+    case 'context':
+      if (focus && msg.query === focus.query) {
+        focus.answers.set(frame.origin, { appName: frame.appName, frame, items: msg.items.slice(0, 20) })
+        renderContext()
+      }
       break
   }
   renderFrame(frame)
@@ -336,6 +476,21 @@ const DEFAULT_FRAMES: SavedFrame[] = [
   { url: `${APP_ORIGIN}/?name=Posts&handles=app.bsky.feed.post`, did: null },
   { url: `${APP_ORIGIN}/?name=Profiles&handles=app.bsky.actor.profile`, did: null },
 ]
+
+/** Mocked partner apps with fake data, to show actions and "what links here". */
+const MOCK_FRAMES: SavedFrame[] = [
+  { url: `${MOCK_ORIGINS.skyreader}/`, did: null },
+  { url: `${MOCK_ORIGINS.reams}/`, did: null },
+  { url: `${MOCK_ORIGINS.roomy}/`, did: null },
+]
+
+const PRESETS: Record<string, SavedFrame[]> = { demo: DEFAULT_FRAMES, mocks: MOCK_FRAMES }
+
+/** Replace the open frames with a preset. */
+function openPreset(saved: SavedFrame[]) {
+  for (const f of [...frames.values()]) closeFrame(f)
+  for (const f of saved) openFrame(f.url, f.did)
+}
 
 function restoreFrames(): SavedFrame[] {
   try {
@@ -396,11 +551,20 @@ $<HTMLFormElement>('#add-frame').addEventListener('submit', (e) => {
 })
 ;($<HTMLInputElement>('#add-frame input')).value = `${APP_ORIGIN}/`
 
+for (const b of document.querySelectorAll<HTMLButtonElement>('[data-preset]')) {
+  b.addEventListener('click', () => openPreset(PRESETS[b.dataset.preset!] ?? DEFAULT_FRAMES))
+}
+$<HTMLButtonElement>('#act-sheet .act-cancel').addEventListener('click', () => $<HTMLDialogElement>('#act-sheet').close())
+
 await loadAccounts()
+const preset = PRESETS[new URLSearchParams(location.search).get('preset') ?? '']
 if (FEDCM_LOGIN) {
   // The browser opened login_url (with ?fedcm-login=1) because an app asked
   // for an account and the shell had none. Don't open frames in this popup.
   $<HTMLElement>('#fedcm-login').hidden = false
+} else if (preset) {
+  openPreset(preset)
+  history.replaceState(null, '', location.pathname)
 } else {
   for (const f of restoreFrames()) openFrame(f.url, f.did)
 }

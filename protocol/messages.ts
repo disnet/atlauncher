@@ -20,6 +20,28 @@ export interface AccountRef {
   handle: string
 }
 
+/**
+ * Something one app can hand to another: a record, a web page, or both.
+ * `title` is what the shell shows; the rest is up to the apps.
+ */
+export interface Item {
+  title: string
+  uri?: AtUri
+  url?: string
+  text?: string
+}
+
+/**
+ * Something an app can do with items another app hands it, such as "Take a
+ * note" or "Share to a channel". `accepts` lists the collections (NSID
+ * patterns, as in `handles`) it takes; `url` means any item with a web URL.
+ */
+export interface ActionDecl {
+  id: string
+  label: string
+  accepts: string[]
+}
+
 // ---- app -> shell ---------------------------------------------------------
 
 /** Sent once the app has loaded and restored its sessions. */
@@ -36,6 +58,8 @@ export interface HelloMessage {
    * requests for those collections to this app.
    */
   handles?: string[]
+  /** What this app can do with items from other apps. */
+  actions?: ActionDecl[]
 }
 
 /** Sent whenever the app's sessions or active account change. */
@@ -75,7 +99,44 @@ export interface OpenRequestMessage {
   did?: Did
 }
 
-export type AppToShell = HelloMessage | StateMessage | NeedsSignInMessage | UnreadMessage | OpenRequestMessage
+/**
+ * Ask the shell to offer `item` to the other apps' actions. The shell shows
+ * the user the actions that accept it and sends the chosen app `perform`.
+ */
+export interface ActRequestMessage {
+  proto: typeof PROTO
+  type: 'act'
+  item: Item
+  did?: Did
+}
+
+/**
+ * What the frame is showing now, or null for nothing in particular. The
+ * shell asks the other apps what they have about it ("what links here").
+ */
+export interface FocusMessage {
+  proto: typeof PROTO
+  type: 'focus'
+  item: Item | null
+}
+
+/** Reply to `context-query`: this app's items about the focused item. */
+export interface ContextMessage {
+  proto: typeof PROTO
+  type: 'context'
+  query: string
+  items: Item[]
+}
+
+export type AppToShell =
+  | HelloMessage
+  | StateMessage
+  | NeedsSignInMessage
+  | UnreadMessage
+  | OpenRequestMessage
+  | ActRequestMessage
+  | FocusMessage
+  | ContextMessage
 
 // ---- shell -> app ---------------------------------------------------------
 
@@ -109,7 +170,29 @@ export interface OpenMessage {
   account?: AccountRef
 }
 
-export type ShellToApp = SwitchMessage | SignOutMessage | OpenMessage
+/** Run one of the app's declared actions on `item`, as `account` if given. */
+export interface PerformMessage {
+  proto: typeof PROTO
+  type: 'perform'
+  action: string
+  item: Item
+  account?: AccountRef
+}
+
+/**
+ * Another frame is showing `item`. Reply with `context` carrying the same
+ * `query`, listing what this app has about it, for the account `did` if
+ * given. The answer goes only to the shell, so private items stay private.
+ */
+export interface ContextQueryMessage {
+  proto: typeof PROTO
+  type: 'context-query'
+  query: string
+  item: Item
+  did?: Did
+}
+
+export type ShellToApp = SwitchMessage | SignOutMessage | OpenMessage | PerformMessage | ContextQueryMessage
 
 // ---- validation ----------------------------------------------------------
 
@@ -150,6 +233,28 @@ const isUnreadCounts = (v: unknown): v is UnreadMessage['counts'] =>
 const isAccountRef = (v: unknown): v is AccountRef =>
   isObj(v) && isDid(v.did) && typeof v.handle === 'string'
 
+const isOptString = (v: unknown) => v === undefined || typeof v === 'string'
+
+export const isItem = (v: unknown): v is Item =>
+  isObj(v) &&
+  typeof v.title === 'string' &&
+  (v.uri === undefined || isAtUri(v.uri)) &&
+  (v.url === undefined || (typeof v.url === 'string' && /^https?:\/\//.test(v.url))) &&
+  isOptString(v.text)
+
+const isActionDecl = (v: unknown): v is ActionDecl =>
+  isObj(v) &&
+  typeof v.id === 'string' &&
+  typeof v.label === 'string' &&
+  Array.isArray(v.accepts) &&
+  v.accepts.every((a) => a === 'url' || isNsidPattern(a))
+
+/** Does an action that lists `accepts` take `item`? */
+export function acceptsItem(accepts: readonly string[], item: Item): boolean {
+  const collection = item.uri ? collectionOf(item.uri) : null
+  return accepts.some((a) => (a === 'url' ? !!item.url : !!collection && handlesCollection([a], collection)))
+}
+
 export function parseAppToShell(data: unknown): AppToShell | null {
   if (!isObj(data) || data.proto !== PROTO) return null
   switch (data.type) {
@@ -158,7 +263,8 @@ export function parseAppToShell(data: unknown): AppToShell | null {
         typeof data.app.name === 'string' &&
         isDidList(data.sessions) &&
         (data.active === null || isDid(data.active)) &&
-        (data.handles === undefined || (Array.isArray(data.handles) && data.handles.every(isNsidPattern)))
+        (data.handles === undefined || (Array.isArray(data.handles) && data.handles.every(isNsidPattern))) &&
+        (data.actions === undefined || (Array.isArray(data.actions) && data.actions.every(isActionDecl)))
         ? (data as unknown as HelloMessage)
         : null
     case 'state':
@@ -173,6 +279,16 @@ export function parseAppToShell(data: unknown): AppToShell | null {
     case 'open':
       return isAtUri(data.uri) && (data.did === undefined || isDid(data.did))
         ? (data as unknown as OpenRequestMessage)
+        : null
+    case 'act':
+      return isItem(data.item) && (data.did === undefined || isDid(data.did))
+        ? (data as unknown as ActRequestMessage)
+        : null
+    case 'focus':
+      return data.item === null || isItem(data.item) ? (data as unknown as FocusMessage) : null
+    case 'context':
+      return typeof data.query === 'string' && Array.isArray(data.items) && data.items.every(isItem)
+        ? (data as unknown as ContextMessage)
         : null
     default:
       return null
@@ -189,6 +305,16 @@ export function parseShellToApp(data: unknown): ShellToApp | null {
     case 'open':
       return isAtUri(data.uri) && (data.account === undefined || isAccountRef(data.account))
         ? (data as unknown as OpenMessage)
+        : null
+    case 'perform':
+      return typeof data.action === 'string' &&
+        isItem(data.item) &&
+        (data.account === undefined || isAccountRef(data.account))
+        ? (data as unknown as PerformMessage)
+        : null
+    case 'context-query':
+      return typeof data.query === 'string' && isItem(data.item) && (data.did === undefined || isDid(data.did))
+        ? (data as unknown as ContextQueryMessage)
         : null
     default:
       return null

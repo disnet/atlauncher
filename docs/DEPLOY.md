@@ -1,12 +1,13 @@
 # Deploying the demo to Cloudflare
 
-The demo needs three origins, one per part, just as it does locally:
+The demo needs an origin per part, just as it does locally:
 
 | Part | Worker | URL |
 |---|---|---|
 | Shell (Phase 1 FedCM IdP) | `atworkplace-shell` | `https://atworkplace-shell.<subdomain>.workers.dev` |
 | Demo app | `atworkplace-app` | `https://atworkplace-app.<subdomain>.workers.dev` |
 | Mock PDS (Phase 2 FedCM IdP) | `atworkplace-pds` | `https://atworkplace-pds.<subdomain>.workers.dev/login` |
+| Mock apps | `atworkplace-skyreader`, `-reams`, `-roomy` | `https://atworkplace-skyreader.<subdomain>.workers.dev` and so on |
 
 `<subdomain>` is the account's workers.dev subdomain. `workers.dev` is on
 the Public Suffix List, so each Worker is its own site: the framed app is
@@ -15,7 +16,7 @@ cross-site from the shell and gets partitioned storage, as on localhost.
 Each part is a Worker with static assets. The Worker runs first on every
 request (`run_worker_first`), so the same handlers as the local Node servers
 answer the FedCM, OAuth, relay and API routes and set the CSP headers on
-pages. The three share one D1 database for state that has to outlive a
+pages. They share one D1 database for state that has to outlive a
 single request: the shell's account lists, the popup relay, and the mock
 PDS's codes and tokens.
 
@@ -32,7 +33,7 @@ CLOUDFLARE_ACCOUNT_ID=<account id> npm run deploy
 
 The script (`deploy/deploy.ts`):
 
-1. Looks up the account's workers.dev subdomain to work out the three origins.
+1. Looks up the account's workers.dev subdomain to work out the origins.
 2. Creates the D1 database `atworkplace` if it doesn't exist, and applies
    `deploy/schema.sql` (idempotent).
 3. Builds `deploy/out/<part>/`: the browser bundles with the deployed origins
@@ -43,8 +44,9 @@ Run it again to redeploy. Options, as environment variables:
 
 - `ATWORKPLACE_PREFIX`: names the Workers `<prefix>-shell` and so on, and the
   database `<prefix>` (default `atworkplace`).
-- `SHELL_ORIGIN`, `APP_ORIGIN`, `PDS_ORIGIN`: use these origins instead of
-  workers.dev, for custom domains. Add the routes in Cloudflare yourself.
+- `SHELL_ORIGIN`, `APP_ORIGIN`, `PDS_ORIGIN`, `SKYREADER_ORIGIN`,
+  `REAMS_ORIGIN`, `ROOMY_ORIGIN`: use these origins instead of workers.dev,
+  for custom domains. Add the routes in Cloudflare yourself.
 
 ## From GitHub Actions
 
@@ -75,8 +77,9 @@ runs the same HTTP tests as `npm test` against the deployment. The tests
 also start the local servers, which they then ignore.
 
 `npm run deploy:preview` runs the deploy build locally under `wrangler dev`
-with a local D1, on ports 8780 (shell), 8781 (app, on `127.0.0.1`) and 8782
-(mock PDS), so the Workers can be checked before deploying.
+with a local D1, on ports 8780 (shell), 8781 (app, on `127.0.0.1`), 8782
+(mock PDS) and 8783 to 8785 (mock apps), so the Workers can be checked
+before deploying.
 
 ## Differences from local
 
