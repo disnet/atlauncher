@@ -30,7 +30,7 @@ one-time relay on the app's own server. The frame then calls
 To check: does the auth server's COOP sever `window.opener`? The event log
 shows "callback via postMessage" or "callback via server relay".
 
-**Observed (Chrome, version not yet recorded, 2026-10-26, Tim):** with
+**Observed (Chrome 155.0.8059.85 arm64, 2026-10-26, Tim):** with
 bsky.social as the auth server, the frame's handle on the popup reported
 `closed === true` about two seconds after the popup was sent to the
 authorization URL, while the popup was still open and sign-in went on. The
@@ -38,7 +38,7 @@ first version of the relay treated that as "Sign-in window closed" and gave
 up, so finishing sign-in in the popup did nothing. This fits COOP putting
 the popup in a new browsing context group, which also severs the opener.
 
-**Fix (observed working, Chrome, version not yet recorded, 2026-10-26,
+**Fix (observed working, Chrome 155.0.8059.85 arm64, 2026-10-26,
 Tim):** `waitForRelay` no longer
 trusts `popup.closed`. It logs "popup handle reports closed (COOP?)" once
 and keeps polling the relay until the 5-minute deadline. The cost: if the
@@ -52,7 +52,7 @@ site). Sessions added in one appear in the other after a reload, and the
 library's refresh locks coordinate across them. Open the demo app twice in
 the shell to check.
 
-**Observed (Chrome, version not yet recorded, 2026-10-26, Tim):** a second
+**Observed (Chrome 155.0.8059.85 arm64, 2026-10-26, Tim):** a second
 frame of the demo app lists every account signed in to the first, and each
 frame can switch between them. But after reloading the shell, both frames
 come back on whichever account was picked last, in either frame. The
@@ -61,7 +61,7 @@ frames overwrite each other's choice. Which account a frame shows is
 per-frame state, and shared storage can't hold it. Refresh across frames
 is not checked yet.
 
-**Fix (observed working, Chrome, version not yet recorded, 2026-10-26,
+**Fix (observed working, Chrome 155.0.8059.85 arm64, 2026-10-26,
 Tim, with two real accounts):** the shell saves each frame's account and sends `switch` after the frame's `hello` (see
 PROTOCOL.md). In Playwright Chromium 153 with two mock accounts, frames set
 to Alice and Bob come back as Alice and Bob after a reload. Without the fix
@@ -76,10 +76,14 @@ other frame for the same account, then in the first again. All three
 should succeed. A failure means a frame used a refresh token the other had
 already rotated.
 
-- **Expected, real atproto sessions:** works. `@atproto/oauth-client-browser`
-  refreshes under a `navigator.locks` lock and reads the stored session
-  again inside it. Locks and IndexedDB are both per partition, so both
-  frames share them. Still to check in Chrome.
+- **Observed, real atproto sessions (Chrome 155.0.8059.85 arm64,
+  2026-10-26, Tim):** works. Two frames on one account, refreshed in turn
+  (frame 1, frame 2, frame 1): each frame's "expires before" equals the
+  other frame's previous "expires after", and every authenticated call
+  succeeded. Each frame picks up the token the other just rotated, because
+  `@atproto/oauth-client-browser` refreshes under a `navigator.locks` lock
+  and reads the stored session again inside it. Locks and IndexedDB are
+  both per partition, so the frames share them.
 - **Seen in Playwright Chromium 153, mock PDS sessions:** one frame after
   the other worked. Clicking both at once failed in the second frame with
   `invalid_grant`, because the demo app's own mock client had no lock. The
@@ -96,7 +100,7 @@ sessions, because the framed copy's storage is keyed by the shell's site. To
 users that looks like being "logged out" in the shell. A real deployment would
 want the Storage Access API or a per-app explanation.
 
-**Observed (Chrome, version not yet recorded, 2026-10-26, Tim):** the demo
+**Observed (Chrome 155.0.8059.85 arm64, 2026-10-26, Tim):** the demo
 app opened at top level shows none of the accounts signed in inside the
 shell.
 
@@ -106,7 +110,7 @@ shell.
   without it `navigator.credentials.get` rejects with a permissions error.
 - **Expected:** after the FedCM call, the click's user activation is used up,
   so the Phase 1 OAuth popup needs a second click. Phase 2 has no popup.
-- **Observed (Chrome, version not yet recorded, 2026-10-26, Tim):**
+- **Observed (Chrome 155.0.8059.85 arm64, 2026-10-26, Tim):**
   "Choose from atworkplace" failed right away with "Error retrieving a
   token." and no account chooser.
   Diagnosed in Playwright's Chromium 153 without the well-known flag, which
@@ -116,7 +120,7 @@ shell.
   `client_metadata` is used, the well-known file must repeat
   `accounts_endpoint` and `login_url` (a hard requirement from Chrome 145).
   **Fix:** each IdP's well-known names only its own config plus those two
-  endpoints. **Observed working (Chrome, version not yet recorded,
+  endpoints. **Observed working (Chrome 155.0.8059.85 arm64,
   2026-10-26, Tim):** the shell's chooser appears in the frame and the app
   receives the account hint.
 - **Expected (from the Playwright run):** Chrome fetches the well-known
