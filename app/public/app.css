@@ -44,10 +44,17 @@ button:disabled { opacity: 0.55; cursor: default; }
 .muted { color: var(--muted); }
 .did { font: 11px ui-monospace, monospace; color: var(--muted); word-break: break-all; }
 .sessions { list-style: none; padding: 0; margin: 0; }
-.sessions li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
-.sessions li span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sessions li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.sessions li span:first-child { flex: 1 0 140px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .sessions li.active span:first-child { font-weight: 600; }
 .sessions .kind { font-size: 11px; color: var(--muted); }
 .sessions .empty { color: var(--muted); }
 .sessions button { padding: 4px 8px; font-size: 12px; }
 .log { font: 11px/1.5 ui-monospace, monospace; background: color-mix(in srgb, var(--line) 40%, transparent); padding: 8px; border-radius: 6px; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+.sessions .unread { font-size: 11px; font-weight: 600; color: var(--accent); }
+.opened { border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px; margin-top: 10px; }
+.opened h2 { margin-top: 0; }
+.opened .name { font-weight: 600; }
+.links { list-style: none; padding: 0; margin: 8px 0 0; }
+.links li { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.links li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

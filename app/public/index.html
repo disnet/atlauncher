@@ -8,7 +8,7 @@
   </head>
   <body>
     <header class="top">
-      <strong>Demo app</strong>
+      <strong id="app-name">Demo app</strong>
       <span id="busy" class="busy"></span>
     </header>
     <p id="context" class="context"></p>
@@ -34,6 +34,13 @@
       </div>
     </section>
 
+    <section id="opened" class="opened" hidden>
+      <h2>Opened from the workspace</h2>
+      <div id="opened-title" class="name"></div>
+      <p id="opened-body"></p>
+      <div id="opened-uri" class="did"></div>
+    </section>
+
     <section>
       <h2>Accounts in this app</h2>
       <ul id="sessions" class="sessions"></ul>
@@ -52,6 +59,16 @@
       <form id="by-handle" class="row">
         <input name="handle" placeholder="or a handle, e.g. you.bsky.social" autocomplete="off" />
         <button>Sign in</button>
+      </form>
+    </section>
+
+    <section id="links-section" hidden>
+      <h2>Links</h2>
+      <p class="muted">Opens in whichever app in the workspace handles that kind of record.</p>
+      <ul id="links" class="links"></ul>
+      <form id="open-uri" class="row">
+        <input name="uri" placeholder="or any at:// URI" autocomplete="off" />
+        <button class="secondary">Open</button>
       </form>
     </section>
 

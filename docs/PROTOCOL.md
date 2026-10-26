@@ -25,9 +25,11 @@ Every message has `proto: "atworkplace/1"` and a `type`.
 
 | type | fields | when |
 |---|---|---|
-| `hello` | `app.name`, `sessions: Did[]`, `active: Did \| null` | once, after the app restores its sessions |
+| `hello` | `app.name`, `sessions: Did[]`, `active: Did \| null`, `handles?: string[]` | once, after the app restores its sessions |
 | `state` | `sessions`, `active` | whenever either changes |
 | `needs-sign-in` | `did` | after a `switch` the app can't complete without a click |
+| `unread` | `counts: { did, count }[]` | whenever its unread counts change, as a full snapshot |
+| `open` | `uri: AtUri`, `did?` | the user followed an `at://` link the app wants the workspace to show |
 
 ## Shell → app
 
@@ -35,12 +37,36 @@ Every message has `proto: "atworkplace/1"` and a `type`.
 |---|---|---|
 | `switch` | `account: { did, handle }` | make it active, or prompt "Continue as @handle" |
 | `sign-out` | `did` | revoke and forget that account's session in the app |
+| `open` | `uri: AtUri`, `account?: { did, handle }` | show that record, as that account if given (same rules as `switch`) |
 
 Which account a frame shows belongs to the shell. Frames of the same app
 share storage, so an app's own idea of "active" is whatever any of its
 frames picked last. The shell saves each frame's account with its URL. When
 a restored frame sends `hello` with a different `active`, the shell sends
 `switch` for the saved account, if the frame has a session for it.
+
+## Unread badges
+
+An app reports unread counts per account in `unread`. An account left out
+has none. The shell shows a badge on each frame for the account it shows,
+and one on each account in the sidebar for the total across apps. Frames of
+one app share storage and report the same counts, so the shell counts each
+app origin once.
+
+## Opening links across apps
+
+`hello` may list `handles`: the collections whose records the app can show,
+as NSIDs. A trailing `.*` covers a namespace (`app.bsky.feed.*`). Apps that
+send no `handles` get no `open` messages.
+
+When an app sends `open` with an `at://` URI, the shell picks a frame whose
+app handles that URI's collection, preferring one already showing `did`. If
+no open frame does, it opens a new frame of an app it has seen before that
+does. If it knows none, it tells the user. The shell sends the chosen frame
+`open`, with `account` when it knows the account named by `did`.
+
+An app decides which links to hand to the shell. Links to its own records
+can stay inside the app.
 
 ## FedCM tokens
 

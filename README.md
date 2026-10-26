@@ -70,6 +70,16 @@ The shell and mock PDS set `SameSite=None; Secure` cookies. Chrome treats
 2. In the demo app, click **Mock PDS account (Phase 2)**, pick an account in
    Chrome's chooser, and you're signed in. No popup, no redirect.
 
+**Workspace features:** the shell opens the demo app twice, as "Posts"
+and "Profiles".
+
+1. With an account signed in, click **+1 unread** next to it in either
+   frame. A badge shows on each frame using that account and on the account
+   in the sidebar.
+2. Under **Links** in Posts, open the account's profile. It opens in the
+   Profiles frame. Paste an `at://` post URI in Profiles to see it open in
+   Posts.
+
 **Things to look for:** open the demo app twice in the shell; compare it
 with the app opened at top level; read the event log in each frame. What
 these should show, and what has actually been observed, is in
