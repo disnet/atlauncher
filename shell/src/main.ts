@@ -28,6 +28,8 @@ interface Frame {
   sessions: Did[]
   active: Did | null
   pending: Did | null
+  /** Account this frame showed before a reload; restored after its `hello`. */
+  restore: Did | null
 }
 
 const $ = <T extends Element>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T
@@ -107,7 +109,7 @@ function renderAccounts() {
 
 // ---- frames --------------------------------------------------------------
 
-function openFrame(url: string, id = crypto.randomUUID()) {
+function openFrame(url: string, restore: Did | null = null, id = crypto.randomUUID()) {
   const tpl = $<HTMLTemplateElement>('#frame-tpl')
   const el = tpl.content.firstElementChild!.cloneNode(true) as HTMLElement
   const iframe = $<HTMLIFrameElement>('iframe', el)
@@ -121,6 +123,7 @@ function openFrame(url: string, id = crypto.randomUUID()) {
     sessions: [],
     active: null,
     pending: null,
+    restore,
   }
   iframe.src = url
   $<HTMLButtonElement>('.close', el).addEventListener('click', () => {
@@ -182,15 +185,23 @@ window.addEventListener('message', (event) => {
   const msg = parseAppToShell(event.data)
   if (!msg) return
   switch (msg.type) {
-    case 'hello':
+    case 'hello': {
       frame.appName = msg.app.name
       frame.sessions = msg.sessions
       frame.active = msg.active
+      // Frames of one app share storage, so the app's own "active" is
+      // whatever any frame picked last. Which account *this* frame shows is
+      // the shell's to remember.
+      const want = frame.restore && accounts.find((a) => a.did === frame.restore)
+      frame.restore = null
+      if (want && want.did !== msg.active && msg.sessions.includes(want.did)) switchFrame(frame, want)
       break
+    }
     case 'state':
       frame.sessions = msg.sessions
       frame.active = msg.active
       if (frame.pending === msg.active) frame.pending = null
+      saveFrames()
       break
     case 'needs-sign-in':
       frame.pending = msg.did
@@ -199,18 +210,33 @@ window.addEventListener('message', (event) => {
   renderFrame(frame)
 })
 
+interface SavedFrame {
+  url: string
+  did: Did | null
+}
+
 function saveFrames() {
+  const saved: SavedFrame[] = [...frames.values()].map((f) => ({ url: f.url, did: f.active ?? f.restore }))
   try {
-    localStorage.setItem('awp.frames', JSON.stringify([...frames.values()].map((f) => f.url)))
+    localStorage.setItem('awp.frames', JSON.stringify(saved))
   } catch {}
 }
 
-function restoreFrames(): string[] {
+function restoreFrames(): SavedFrame[] {
   try {
     const v = JSON.parse(localStorage.getItem('awp.frames') ?? 'null')
-    if (Array.isArray(v) && v.length) return v.filter((x) => typeof x === 'string')
+    if (Array.isArray(v) && v.length) {
+      // Older saves are plain URL strings.
+      return v.flatMap((x): SavedFrame[] =>
+        typeof x === 'string'
+          ? [{ url: x, did: null }]
+          : x && typeof x.url === 'string'
+            ? [{ url: x.url, did: typeof x.did === 'string' && x.did.startsWith('did:') ? (x.did as Did) : null }]
+            : [],
+      )
+    }
   } catch {}
-  return [`${APP_ORIGIN}/`]
+  return [{ url: `${APP_ORIGIN}/`, did: null }]
 }
 
 // ---- helpers & boot ------------------------------------------------------
@@ -256,5 +282,5 @@ if (FEDCM_LOGIN) {
   // for an account and the shell had none. Don't open frames in this popup.
   $<HTMLElement>('#fedcm-login').hidden = false
 } else {
-  for (const url of restoreFrames()) openFrame(url)
+  for (const f of restoreFrames()) openFrame(f.url, f.did)
 }

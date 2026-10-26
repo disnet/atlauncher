@@ -36,6 +36,12 @@ Every message has `proto: "atworkplace/1"` and a `type`.
 | `switch` | `account: { did, handle }` | make it active, or prompt "Continue as @handle" |
 | `sign-out` | `did` | revoke and forget that account's session in the app |
 
+Which account a frame shows belongs to the shell. Frames of the same app
+share storage, so an app's own idea of "active" is whatever any of its
+frames picked last. The shell saves each frame's account with its URL. When
+a restored frame sends `hello` with a different `active`, the shell sends
+`switch` for the saved account, if the frame has a session for it.
+
 ## FedCM tokens
 
 ### Phase 1: the shell as identity provider

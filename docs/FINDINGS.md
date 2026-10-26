@@ -61,6 +61,12 @@ frames overwrite each other's choice. Which account a frame shows is
 per-frame state, and shared storage can't hold it. Refresh across frames
 is not checked yet.
 
+**Fix (expected to work, needs a re-check in Chrome):** the shell saves each
+frame's account and sends `switch` after the frame's `hello` (see
+PROTOCOL.md). In Playwright Chromium 153 with two mock accounts, frames set
+to Alice and Bob come back as Alice and Bob after a reload. Without the fix
+they both come back as Bob.
+
 ## 3. Sessions inside vs outside the shell
 
 **Expected:** signing in to the demo app at top level
