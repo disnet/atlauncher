@@ -61,11 +61,32 @@ frames overwrite each other's choice. Which account a frame shows is
 per-frame state, and shared storage can't hold it. Refresh across frames
 is not checked yet.
 
-**Fix (expected to work, needs a re-check in Chrome):** the shell saves each
-frame's account and sends `switch` after the frame's `hello` (see
+**Fix (observed working, Chrome, version not yet recorded, 2026-10-26,
+Tim, with two real accounts):** the shell saves each frame's account and sends `switch` after the frame's `hello` (see
 PROTOCOL.md). In Playwright Chromium 153 with two mock accounts, frames set
 to Alice and Bob come back as Alice and Bob after a reload. Without the fix
 they both come back as Bob.
+
+### Token refresh across frames
+
+Each account in the demo app has a dev-only **Refresh token** button. It
+refreshes now instead of waiting for expiry, then makes an authenticated
+call with the new token. To check: click it in one frame, then in the
+other frame for the same account, then in the first again. All three
+should succeed. A failure means a frame used a refresh token the other had
+already rotated.
+
+- **Expected, real atproto sessions:** works. `@atproto/oauth-client-browser`
+  refreshes under a `navigator.locks` lock and reads the stored session
+  again inside it. Locks and IndexedDB are both per partition, so both
+  frames share them. Still to check in Chrome.
+- **Seen in Playwright Chromium 153, mock PDS sessions:** one frame after
+  the other worked. Clicking both at once failed in the second frame with
+  `invalid_grant`, because the demo app's own mock client had no lock. The
+  demo app now takes a `navigator.locks` lock per DID and reads the session
+  again inside it. After that, simultaneous refreshes succeed and the second
+  frame logs "another frame already refreshed". Any app that rolls its own
+  token handling needs the same lock once it can run in two frames.
 
 ## 3. Sessions inside vs outside the shell
 

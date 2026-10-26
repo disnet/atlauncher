@@ -14,6 +14,7 @@ import {
   setActive,
   signInWithMockPds,
   signInWithPopup,
+  forceRefresh,
   signOut,
   type SessionEntry,
 } from './sessions.ts'
@@ -138,7 +139,15 @@ function render() {
       await signOut(s)
       await reload()
     }))
-    li.append(label, kind, use, out)
+    // Dev aid: lets FINDINGS check token refresh across frames without
+    // waiting for tokens to expire.
+    const refresh = Object.assign(document.createElement('button'), {
+      textContent: 'Refresh token',
+      className: 'secondary',
+      title: 'Dev: refresh this account\'s tokens now',
+    })
+    refresh.addEventListener('click', () => run(`refreshing ${s.handle}`, () => forceRefresh(s)))
+    li.append(label, kind, use, refresh, out)
     ul.append(li)
   }
   if (!sessions.length) {

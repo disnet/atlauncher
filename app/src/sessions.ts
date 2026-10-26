@@ -267,7 +267,23 @@ async function mockFetch(did: Did, url: string): Promise<Response> {
   })
 }
 
-async function mockRefresh(did: Did, s: MockStored): Promise<MockStored> {
+// Frames of the app share one partition, so two of them can try to refresh
+// the same session at once. Refresh tokens rotate, so the loser's token is
+// already spent: take a cross-frame lock and re-read the stored session
+// inside it (the atproto library does the same with navigator.locks).
+async function mockRefresh(did: Did, seen: MockStored): Promise<MockStored> {
+  return navigator.locks.request(`mock-refresh:${did}`, async () => {
+    const s = await idbGet<MockStored>(`mock:${did}`)
+    if (!s) throw new Error('No mock session')
+    if (s.refreshToken !== seen.refreshToken) {
+      log('another frame already refreshed', { did })
+      return s
+    }
+    return mockRefreshLocked(did, s)
+  })
+}
+
+async function mockRefreshLocked(did: Did, s: MockStored): Promise<MockStored> {
   const res = await fetch(s.tokenEndpoint, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded', DPoP: await dpopProof(s.key, 'POST', s.tokenEndpoint) },
@@ -295,6 +311,32 @@ export async function getProfile(e: SessionEntry): Promise<Profile> {
   const session = await client.restore(e.did)
   const { data } = await new Agent(session).getProfile({ actor: e.did })
   return data as Profile
+}
+
+/**
+ * Dev aid for FINDINGS: refresh this account's tokens now instead of waiting
+ * for them to expire, then make an authenticated call with the new ones.
+ * Run it in one frame, then the other, to see whether frames that share a
+ * partition pick up each other's rotated refresh token.
+ */
+export async function forceRefresh(e: SessionEntry) {
+  if (e.kind === 'mock') {
+    const s = await idbGet<MockStored>(`mock:${e.did}`)
+    if (!s) throw new Error('No mock session')
+    const next = await mockRefresh(e.did, s)
+    await mockGetProfile(e.did)
+    log('forced refresh (mock PDS), profile call ok', { did: e.did, expiresAt: new Date(next.expiresAt).toISOString() })
+    return
+  }
+  const session = await (await oauthClient()).restore(e.did, false)
+  const before = await session.getTokenInfo(false)
+  const after = await session.getTokenInfo(true)
+  await new Agent(session).getProfile({ actor: e.did })
+  log('forced refresh (atproto), profile call ok', {
+    did: e.did,
+    expiresBefore: before.expiresAt?.toISOString(),
+    expiresAfter: after.expiresAt?.toISOString(),
+  })
 }
 
 export async function signOut(e: SessionEntry) {
