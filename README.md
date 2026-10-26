@@ -89,8 +89,6 @@ apps that don't support them yet.
    Semble", sent from one app and handled by another.
 5. One-click sign-in once PDSes support FedCM.
 
-The plan and goals are tracked in atplan:
-`at://did:plc:4vjd3fe2cgzq5d24j4f3zvar/com.disnetdev.atplan.plan/atworkplace`.
 
 ## How the prototype works
 
