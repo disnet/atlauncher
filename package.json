@@ -6,7 +6,9 @@
     "dev": "tsx scripts/dev.ts",
     "build": "tsx scripts/build.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/*.test.ts"
+    "test": "tsx --test test/*.test.ts",
+    "deploy": "tsx deploy/deploy.ts",
+    "deploy:preview": "tsx deploy/preview.ts"
   },
   "repository": {
     "type": "git",
@@ -27,7 +29,8 @@
     "@types/node": "^26.6.5",
     "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "wrangler": "^4.152.0"
   },
   "private": true,
   "type": "module"

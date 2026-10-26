@@ -39,6 +39,11 @@ The app runs on `127.0.0.1` so it can use an atproto *loopback* OAuth client
 (no hosted client metadata needed), and so it is cross-site from the shell and
 gets partitioned storage, like a real deployment would.
 
+### Deployed
+
+`npm run deploy` puts the three parts on Cloudflare Workers, each on its
+own workers.dev subdomain. See [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ### Chrome setup
 
 FedCM requires the identity provider to publish `/.well-known/web-identity`
@@ -92,9 +97,13 @@ protocol/messages.ts   shell ↔ app messages and FedCM token formats, with vali
 shell/                 the atworkplace page, and its FedCM IdP endpoints (Phase 1)
 app/                   the demo framed app: multi-session OAuth, popup relay, Phase 2 client
 mock-pds/              PDS-style auth server that speaks FedCM + DPoP (Phase 2)
-lib/                   origins and tiny HTTP helpers
+  */site.ts            each server's routes, runtime-neutral (Fetch API Request/Response)
+  */server.ts          runs it under Node for npm run dev
+lib/                   origins, HTTP helpers, key-value tables, the Node runner
+deploy/                Cloudflare Workers entries, D1 tables, build and deploy scripts
 docs/PROTOCOL.md       the protocol in prose
 docs/FINDINGS.md       what breaks in partitioned iframes, and open questions
+docs/DEPLOY.md         deploying to Cloudflare
 test/                  protocol tests and end-to-end tests of both IdPs over HTTP
 ```
 
@@ -109,8 +118,9 @@ npm run typecheck
   token → XRPC flow, and the popup relay over HTTP. The browser parts (Chrome's
   chooser, popups, partitioning) have not been run in a real browser yet. That
   is the next step, and FINDINGS.md is where results go.
-- The shell's account list is a JSON file in `.data/`, keyed by a cookie.
+- The shell's account list is a JSON file in `.data/`, keyed by a cookie
+  (in D1 when deployed).
 - The mock PDS skips PAR, DPoP server nonces and client metadata, and keeps
-  everything in memory.
+  everything in memory (in D1 when deployed).
 - Real apps would need to opt in: allow the shell in `frame-ancestors`, hold
   several sessions keyed by DID, and speak `atworkplace/1`.

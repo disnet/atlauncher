@@ -45,6 +45,17 @@ and keeps polling the relay until the 5-minute deadline. The cost: if the
 user really closes the popup, the frame waits out the deadline (another
 click starts a fresh sign-in).
 
+### Granular scopes
+
+**Expected:** the demo app asks for `atproto` plus two `rpc:` scopes, for
+`app.bsky.actor.getProfile` and `app.bsky.notification.getUnreadCount` with
+`aud=did:web:api.bsky.app#bsky_appview`, instead of `transition:generic`.
+Its Agent sends `atproto-proxy` naming that AppView so the PDS can match
+each call to its scope. bsky.social should show a narrower consent screen,
+and both calls should still succeed. Sessions granted `transition:generic`
+earlier keep working until they are signed out. To check: sign in fresh
+and watch the badges and the profile card.
+
 ## 2. Two frames of the same app
 
 **Expected:** both frames share one partition (same app origin, same top-level
@@ -129,6 +140,25 @@ shell.
   check in Chrome, along with whether `params` reaches the assertion
   endpoint (the Phase 2 code exchange worked in Chromium 153, which needs
   them).
+
+## 5. Deployed on workers.dev
+
+Not deployed or checked yet (see docs/DEPLOY.md). What to look for:
+
+- **Expected:** the three parts are on separate `*.workers.dev` subdomains,
+  which are separate sites because `workers.dev` is on the Public Suffix
+  List. The framed app is partitioned as on localhost, and each IdP's
+  `/.well-known/web-identity` sits at its own site's root, so FedCM should
+  accept it without the well-known flag.
+- **Expected:** unlike localhost, the shell and the mock PDS are cross-site
+  from each other too. Neither frames the other, so nothing should change.
+- **Expected:** the deployed app is a web OAuth client, not a loopback one.
+  bsky.social fetches `https://<app>/oauth-client-metadata.json`, and
+  sign-in should work as locally, with the same COOP behavior as in §1.
+- **Expected:** the popup relay and the mock PDS keep their state in D1, so
+  a callback relayed by one Worker isolate is read by another, and codes
+  stay single-use and refresh tokens rotate across isolates. The HTTP tests
+  pass against the deploy build under `wrangler dev` with a local D1.
 
 ## Open questions for a real FedCM profile (Phase 2)
 

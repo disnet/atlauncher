@@ -1,51 +1,50 @@
-// Tiny HTTP helpers shared by the three local servers. No framework, so the
+// Tiny HTTP helpers shared by the three servers. No framework, so the
 // FedCM-specific headers are easy to see.
+//
+// Handlers use the Fetch API's Request and Response, so the same code runs
+// under Node locally (lib/node.ts) and on Cloudflare Pages (deploy/).
 
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { readFile, stat } from 'node:fs/promises'
-import { extname, join, normalize } from 'node:path'
+export type Handler = (req: Request, url: URL) => Promise<Response | undefined> | Response | undefined
 
-export type Handler = (
-  req: IncomingMessage,
-  res: ServerResponse,
-  url: URL,
-) => Promise<boolean | void> | boolean | void
-
-const MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.map': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
+/** One origin's server: its routes, plus headers for the static files it serves. */
+export interface Site {
+  name: string
+  handlers: Handler[]
+  assetHeaders?: (pathname: string) => Record<string, string>
 }
 
-export function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
-  res.writeHead(status, { 'content-type': MIME['.json'], 'cache-control': 'no-store', ...headers })
-  res.end(JSON.stringify(body))
+const JSON_TYPE = 'application/json; charset=utf-8'
+
+export function json(status: number, body: unknown, headers: Record<string, string> = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': JSON_TYPE, 'cache-control': 'no-store', ...headers },
+  })
 }
 
-export function html(res: ServerResponse, status: number, body: string, headers: Record<string, string> = {}) {
-  res.writeHead(status, { 'content-type': MIME['.html'], 'cache-control': 'no-store', ...headers })
-  res.end(body)
+export function html(status: number, body: string, headers: Record<string, string> = {}) {
+  return new Response(body, {
+    status,
+    headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...headers },
+  })
 }
 
-export async function readBody(req: IncomingMessage, limit = 64 * 1024): Promise<string> {
-  const chunks: Buffer[] = []
-  let size = 0
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length
-    if (size > limit) throw new Error('body too large')
-    chunks.push(chunk as Buffer)
-  }
-  return Buffer.concat(chunks).toString('utf8')
+export function empty(status: number, headers: Record<string, string> = {}) {
+  return new Response(null, { status, headers: { 'cache-control': 'no-store', ...headers } })
+}
+
+export async function readBody(req: Request, limit = 64 * 1024): Promise<string> {
+  const declared = Number(req.headers.get('content-length') ?? 0)
+  if (declared > limit) throw new Error('body too large')
+  const text = await req.text()
+  if (text.length > limit) throw new Error('body too large')
+  return text
 }
 
 /** Parses an application/x-www-form-urlencoded or JSON body. */
-export async function readParams(req: IncomingMessage): Promise<Record<string, string>> {
+export async function readParams(req: Request): Promise<Record<string, string>> {
   const raw = await readBody(req)
-  const type = req.headers['content-type'] ?? ''
+  const type = req.headers.get('content-type') ?? ''
   if (type.includes('application/json')) {
     const v = raw ? JSON.parse(raw) : {}
     return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, typeof x === 'string' ? x : JSON.stringify(x)]))
@@ -53,8 +52,8 @@ export async function readParams(req: IncomingMessage): Promise<Record<string, s
   return Object.fromEntries(new URLSearchParams(raw))
 }
 
-export function getCookie(req: IncomingMessage, name: string): string | undefined {
-  const header = req.headers.cookie
+export function getCookie(req: Request, name: string): string | undefined {
+  const header = req.headers.get('cookie')
   if (!header) return undefined
   for (const part of header.split(';')) {
     const [k, ...v] = part.trim().split('=')
@@ -73,8 +72,14 @@ export function sessionCookie(name: string, value: string) {
 }
 
 /** True when the browser says this is a FedCM request. */
-export function isWebIdentityRequest(req: IncomingMessage) {
-  return req.headers['sec-fetch-dest'] === 'webidentity'
+export function isWebIdentityRequest(req: Request) {
+  return req.headers.get('sec-fetch-dest') === 'webidentity'
+}
+
+/** False only when the browser says the request came from another origin. */
+export function isSameOrigin(req: Request) {
+  const site = req.headers.get('sec-fetch-site')
+  return !site || site === 'same-origin'
 }
 
 /** CORS headers the assertion endpoint must send back to the relying party. */
@@ -86,39 +91,31 @@ export function fedcmCors(origin: string) {
   }
 }
 
-export async function serveStatic(res: ServerResponse, root: string, pathname: string, headers: Record<string, string> = {}) {
-  const rel = normalize(decodeURIComponent(pathname)).replace(/^(\.\.[/\\])+/, '')
-  let file = join(root, rel)
-  if (!file.startsWith(root)) return false
+/**
+ * Runs a site's handlers in order. `fallback` serves static files (from disk
+ * under Node, from Pages' asset store when deployed) and gets the site's
+ * asset headers added.
+ */
+export async function dispatch(
+  site: Site,
+  req: Request,
+  fallback?: (req: Request, url: URL) => Promise<Response | undefined>,
+): Promise<Response> {
+  const url = new URL(req.url)
   try {
-    const s = await stat(file)
-    if (s.isDirectory()) file = join(file, 'index.html')
-    const body = await readFile(file)
-    res.writeHead(200, {
-      'content-type': MIME[extname(file)] ?? 'application/octet-stream',
-      'cache-control': 'no-store',
-      ...headers,
-    })
-    res.end(body)
-    return true
-  } catch {
-    return false
-  }
-}
-
-export function startServer(name: string, port: number, handlers: Handler[]) {
-  const server = createServer(async (req, res) => {
-    const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
-    try {
-      for (const h of handlers) {
-        if (await h(req, res, url)) return
-      }
-      json(res, 404, { error: 'not_found', path: url.pathname })
-    } catch (err) {
-      console.error(`[${name}]`, err)
-      if (!res.headersSent) json(res, 500, { error: 'server_error', message: String(err) })
+    for (const h of site.handlers) {
+      const res = await h(req, url)
+      if (res) return res
     }
-  })
-  server.listen(port, () => console.log(`[${name}] listening on ${port}`))
-  return server
+    const file = await fallback?.(req, url)
+    if (file) {
+      const res = new Response(file.body, file)
+      for (const [k, v] of Object.entries(site.assetHeaders?.(url.pathname) ?? {})) res.headers.set(k, v)
+      return res
+    }
+    return json(404, { error: 'not_found', path: url.pathname })
+  } catch (err) {
+    console.error(`[${site.name}]`, err)
+    return json(500, { error: 'server_error', message: String(err) })
+  }
 }
