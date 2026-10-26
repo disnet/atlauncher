@@ -136,3 +136,5 @@ button.secondary { background: var(--bg); color: var(--ink); }
   .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
   .frames { grid-template-columns: 1fr; }
 }
+.brand .back { display: block; font-size: 12px; font-weight: 400; color: var(--muted); text-decoration: none; margin-top: 2px; }
+.brand .back:hover { color: var(--accent); }

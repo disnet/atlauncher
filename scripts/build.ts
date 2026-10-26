@@ -5,6 +5,7 @@ import * as esbuild from 'esbuild'
 export const buildOptions: esbuild.BuildOptions = {
   entryPoints: {
     'shell/main': 'shell/src/main.ts',
+    'shell/demo': 'shell/src/demo.ts',
     'app/main': 'app/src/main.ts',
     'app/callback': 'app/src/callback.ts',
     'mocks/main': 'mocks/src/main.ts',

@@ -4,88 +4,104 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>atworkplace</title>
-    <link rel="stylesheet" href="/shell.css" />
+    <link rel="stylesheet" href="/prototype.css" />
   </head>
   <body>
-    <aside class="sidebar">
-      <header class="brand">atworkplace</header>
+    <nav class="rail" aria-label="Apps">
+      <a class="logo" href="/" title="atworkplace">aw</a>
+      <ul id="apps" class="rail-apps"></ul>
+      <button id="add-app-btn" class="rail-btn add" title="Add an app" aria-label="Add an app">+</button>
+      <div class="rail-spacer"></div>
+      <a class="rail-btn demo" href="/demo/" title="The protocol demo: account switching, badges, links and actions across apps">demo</a>
+      <button id="profile-btn" class="profile-btn" popovertarget="profile-menu" title="Switch profile" aria-label="Switch profile">
+        <span class="avatar"></span>
+      </button>
+    </nav>
 
-      <section>
-        <h2>Accounts</h2>
-        <ul id="accounts" class="accounts"></ul>
-        <form id="add-account" class="inline-form">
-          <input name="handle" placeholder="handle.bsky.social" autocomplete="off" required />
+    <main id="stage" class="stage">
+      <section id="empty" class="empty" hidden>
+        <h1>Your atproto apps, side by side</h1>
+        <p>
+          Add an app by its URL. Pick a profile at the bottom of the sidebar
+          and every app that speaks atworkplace/1 switches to that account.
+          Other sites still open, just without switching.
+        </p>
+        <form class="add-form" data-add-app>
+          <input name="url" placeholder="https://app.example" autocomplete="off" required aria-label="App URL" />
+          <button>Add app</button>
+        </form>
+        <p class="hint">Try:</p>
+        <ul id="suggestions" class="suggestions"></ul>
+        <p class="hint">
+          Looking for the earlier demo, with two frames of one app, "Send to…"
+          and "What links here"? It's at <a href="/demo/">/demo/</a>.
+        </p>
+      </section>
+
+      <section id="fedcm-login" class="empty" hidden>
+        <h1>Add an account to atworkplace</h1>
+        <p>
+          An app asked which account to use, and atworkplace has none yet.
+          Add a handle here, then go back to the app and try again.
+        </p>
+        <form class="add-form" data-add-account>
+          <input name="handle" placeholder="handle.bsky.social" autocomplete="off" required aria-label="Handle" />
           <button>Add</button>
         </form>
-        <p class="hint">
-          Adding an account here only names it. Each app still signs in to it
-          with atproto OAuth, and the account's PDS has the final say.
-        </p>
       </section>
+    </main>
 
-      <section id="context" class="context" hidden>
-        <h2>What links here</h2>
-        <p class="context-title"></p>
-        <ul class="context-items"></ul>
-        <p class="hint">
-          Each app answers for itself, and only to the shell, so private
-          notes stay private.
-        </p>
-      </section>
-
-      <section>
-        <h2>Workspaces</h2>
-        <div class="presets">
-          <button data-preset="demo" class="secondary">Demo app</button>
-          <button data-preset="mocks" class="secondary">Reading &amp; notes</button>
-        </div>
-        <p class="hint">
-          "Reading &amp; notes" opens mock versions of Skyreader, Reams and
-          Roomy, with fake data, to show actions and "what links here" across
-          apps. Pick an account in the sidebar to start.
-        </p>
-      </section>
-
-      <section>
-        <h2>Frames</h2>
-        <form id="add-frame" class="inline-form">
-          <input name="url" placeholder="App URL" autocomplete="off" required />
-          <button>Open</button>
-        </form>
-        <p class="hint">
-          The demo app opens twice, as "Posts" and "Profiles". A link opened in
-          one shows up in the other. Open the same URL twice to see two frames
-          of one app share a storage partition.
-        </p>
-      </section>
-
-      <p id="fedcm-login" class="banner" hidden>
-        The browser sent you here to sign in to atworkplace. Add an account,
-        then go back to the app and try again.
+    <div id="profile-menu" class="profile-menu" popover>
+      <h2>Profile</h2>
+      <ul id="profiles" class="profiles"></ul>
+      <form class="add-form" data-add-account>
+        <input name="handle" placeholder="handle.bsky.social" autocomplete="off" required aria-label="Handle" />
+        <button>Add</button>
+      </form>
+      <p class="hint">
+        Adding an account only names it. Each app signs in to it with atproto
+        OAuth, and the account's PDS has the final say.
       </p>
-    </aside>
+    </div>
 
-    <main id="frames" class="frames"></main>
-
-    <dialog id="act-sheet" class="act-sheet">
-      <h2>Send to…</h2>
-      <p class="act-title"></p>
-      <p class="act-text"></p>
-      <ul class="act-options"></ul>
-      <button class="act-cancel secondary">Cancel</button>
+    <dialog id="add-app" class="add-app">
+      <h2>Add an app</h2>
+      <form class="add-form" data-add-app>
+        <input name="url" placeholder="https://app.example" autocomplete="off" required aria-label="App URL" />
+        <button>Add</button>
+      </form>
+      <p class="hint">
+        Apps that speak atworkplace/1 follow your profile. Other sites open as
+        plain pages. Sites that refuse to be framed get a link instead.
+      </p>
+      <button class="secondary" data-close>Cancel</button>
     </dialog>
 
-    <template id="frame-tpl">
-      <article class="frame">
-        <header>
-          <span class="app-name">loading…</span>
-          <select class="account-select" aria-label="Account for this frame"></select>
+    <template id="app-tpl">
+      <section class="app-view" hidden>
+        <header class="app-bar">
+          <span class="app-name"></span>
           <span class="status"></span>
-          <button class="close" title="Close frame" aria-label="Close frame">×</button>
+          <span class="bar-spacer"></span>
+          <button class="icon-btn reload" title="Reload" aria-label="Reload">↻</button>
+          <a class="icon-btn newtab" target="_blank" rel="noopener" title="Open in a new tab" aria-label="Open in a new tab">↗</a>
+          <button class="icon-btn remove" title="Remove from the sidebar" aria-label="Remove from the sidebar">×</button>
         </header>
         <p class="notice" role="status" hidden></p>
-        <iframe allow="identity-credentials-get"></iframe>
-      </article>
+        <div class="blocked" hidden>
+          <h2></h2>
+          <p class="why"></p>
+          <p class="hint">
+            The site's server tells browsers not to show it inside other
+            pages. Only the site can change that, by allowing this workspace
+            in its <code>frame-ancestors</code>.
+          </p>
+          <div class="blocked-actions">
+            <a class="button newtab" target="_blank" rel="noopener">Open in a new tab</a>
+            <button class="secondary recheck">Check again</button>
+          </div>
+        </div>
+      </section>
     </template>
 
     <script type="module" src="/dist/main.js"></script>

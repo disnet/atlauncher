@@ -23,6 +23,8 @@ import {
 } from '../lib/http.ts'
 import type { Table, Tables } from '../lib/store.ts'
 import { isDid, type ShellAssertion } from '../protocol/messages.ts'
+import { probe } from './probe.ts'
+import { appUrl, parseWorkspace, type SavedWorkspace } from './src/workspace.ts'
 
 const COOKIE = 'awp_sid'
 
@@ -46,9 +48,12 @@ const configUrl = `${SHELL_ORIGIN}/fedcm/config.json`
 
 /** Session id → that browser's accounts. */
 export const SHELL_TABLE = 'shell_accounts'
+/** Session id → the prototype's apps and chosen profile. */
+export const WORKSPACE_TABLE = 'shell_workspace'
 
 export function shellSite(tables: Tables): Site {
   const store: Table<ShellAccount[]> = tables(SHELL_TABLE)
+  const workspaces: Table<SavedWorkspace> = tables(WORKSPACE_TABLE)
 
   async function sessionFor(req: Request) {
     const sid = getCookie(req, COOKIE)
@@ -189,15 +194,45 @@ export function shellSite(tables: Tables): Site {
       return replace(accounts.filter((a) => a.did !== did))
     }
 
+    // The prototype's apps and profile, kept with the session like accounts.
+    if (url.pathname === '/api/workspace' && req.method === 'GET') {
+      const workspace = (await workspaces.get(sid)) ?? { apps: [], profile: null }
+      return json(200, workspace, headers)
+    }
+
+    if (url.pathname === '/api/workspace' && req.method === 'PUT') {
+      let body: unknown
+      try {
+        body = JSON.parse(await readBody(req))
+      } catch {}
+      const workspace = parseWorkspace(body)
+      if (!workspace) return json(400, { error: 'invalid workspace' }, headers)
+      await workspaces.set(sid, workspace)
+      return json(200, workspace, headers)
+    }
+
+    // Whether an app's headers let this shell frame it (see probe.ts).
+    if (url.pathname === '/api/probe' && req.method === 'GET') {
+      const target = appUrl(url.searchParams.get('url') ?? '')
+      if (!target) return json(400, { error: 'http(s) url required' }, headers)
+      return json(200, await probe(target, SHELL_ORIGIN), headers)
+    }
+
     return json(404, { error: 'not_found' }, headers)
+  }
+
+  // The demo used to be the main page; it now lives at /demo/.
+  const pages: Handler = (req, url) => {
+    if (url.pathname === '/demo') return new Response(null, { status: 301, headers: { location: `/demo/${url.search}` } })
   }
 
   return {
     name: 'shell',
-    handlers: [fedcm, api],
-    // The shell page frames apps; only it decides what it may frame.
+    handlers: [fedcm, api, pages],
+    // The shell page frames apps; only it decides what it may frame. The
+    // prototype frames any https app, and local http ones in development.
     assetHeaders: () => ({
-      'content-security-policy': `frame-src ${APP_ORIGIN} ${PDS_ORIGIN} ${Object.values(MOCK_ORIGINS).join(' ')} https:`,
+      'content-security-policy': `frame-src ${APP_ORIGIN} ${PDS_ORIGIN} ${Object.values(MOCK_ORIGINS).join(' ')} https: http://localhost:* http://127.0.0.1:*`,
     }),
   }
 }

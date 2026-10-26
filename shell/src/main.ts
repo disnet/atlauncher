@@ -1,72 +1,84 @@
-// The atworkplace shell page.
+// The atworkplace prototype: a thin sidebar of apps added by URL, and one
+// profile (account) for the whole workspace.
 //
-// Holds a list of atproto accounts (names only) and a set of framed apps.
-// Switching an account sends a `switch` message to frames; each app decides
-// how to get a session for it. The shell never sees any app's tokens.
+// One app shows at a time; the others stay loaded so their badges keep
+// coming. Picking a profile sends `switch` to every app that speaks
+// atworkplace/1. Apps that don't still open as plain pages, and apps whose
+// headers refuse framing get a link instead of a blank frame. The apps and
+// the profile are saved with the shell session, next to its accounts.
+//
+// The earlier demo (two frames of one app, actions, "what links here") is
+// at /demo/ (demo.ts).
 
 import {
   PROTO,
   parseAppToShell,
-  collectionOf,
-  handlesCollection,
   type AccountRef,
-  type ActionDecl,
   type AtUri,
   type Did,
-  type Item,
-  type OpenMessage,
   type ShellToApp,
 } from '../../protocol/messages.ts'
 import { APP_ORIGIN, MOCK_ORIGINS } from '../../lib/config.ts'
-import { actionsFor, pickFrame, unreadByAccount } from './workspace.ts'
+import { appUrl, MAX_APPS, pickFrame, unreadByAccount, type SavedApp, type SavedWorkspace } from './workspace.ts'
+import type { Probe } from '../probe.ts'
 
 interface Account extends AccountRef {
   displayName?: string
   avatar?: string
 }
 
-interface Frame {
-  id: string
-  url: string
+/** How long an app gets to say `hello` before the shell treats it as a plain page. */
+const HELLO_TIMEOUT_MS = 6000
+
+interface View {
+  app: SavedApp
   origin: string
   el: HTMLElement
-  iframe: HTMLIFrameElement
-  appName: string
+  iframe: HTMLIFrameElement | null
+  /** Said `hello`: speaks atworkplace/1. */
+  ready: boolean
+  /** No `hello` in time: a plain page, or one that refused to load. */
+  plain: boolean
+  checking: boolean
   sessions: Did[]
   active: Did | null
   pending: Did | null
-  /** Account this frame showed before a reload; restored after its `hello`. */
-  restore: Did | null
-  /** Collections the app said it can show. */
+  needsSignIn: boolean
   handles: string[]
-  /** What the app can do with items from other apps. */
-  actions: ActionDecl[]
   unread: Map<Did, number>
-  /** An `open` to deliver once the frame has said `hello`. */
-  queuedOpen: OpenMessage | null
-  ready: boolean
-}
-
-/** Apps the shell has seen, so it can open one to show a link. */
-interface KnownApp {
-  url: string
-  name: string
-  handles: string[]
+  helloTimer?: ReturnType<typeof setTimeout>
 }
 
 const $ = <T extends Element>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T
+const params = new URLSearchParams(location.search)
+const FEDCM_LOGIN = params.has('fedcm-login')
 
 let accounts: Account[] = []
-const FEDCM_LOGIN = new URLSearchParams(location.search).has('fedcm-login')
-const frames = new Map<string, Frame>()
+let workspace: SavedWorkspace = { apps: [], profile: null }
+const views = new Map<string, View>()
+let selected: string | null = null
 
-// ---- accounts ------------------------------------------------------------
+// ---- server state ------------------------------------------------------------
 
-async function loadAccounts() {
-  const res = await fetch('/api/accounts', { credentials: 'same-origin' })
-  accounts = (await res.json()).accounts
-  renderAccounts()
+async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, { credentials: 'same-origin', ...init })
+  if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`)
+  return res.json()
 }
+
+let saving = Promise.resolve()
+function saveWorkspace() {
+  // Serialize saves so an older PUT can't land after a newer one.
+  const body = JSON.stringify(workspace)
+  saving = saving
+    .then(() => api('/api/workspace', { method: 'PUT', headers: { 'content-type': 'application/json' }, body }))
+    .then(
+      () => {},
+      (err) => console.warn("couldn't save the workspace", err),
+    )
+}
+
+// ---- accounts and the profile -------------------------------------------------
 
 /** Resolve a handle to DID + profile through the public AppView. */
 async function lookupProfile(handle: string): Promise<Account> {
@@ -81,435 +93,355 @@ async function lookupProfile(handle: string): Promise<Account> {
 
 async function addAccount(handle: string) {
   const profile = await lookupProfile(handle)
-  const res = await fetch('/api/accounts', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(profile),
-  })
-  accounts = (await res.json()).accounts
-  // Also tell the browser directly, in case the Set-Login header was missed.
+  accounts = (
+    await api<{ accounts: Account[] }>('/api/accounts', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(profile),
+    })
+  ).accounts
   ;(navigator as any).login?.setStatus?.('logged-in')
-  renderAccounts()
   // In the FedCM login popup, hand control back to the app's FedCM call.
-  if (FEDCM_LOGIN) (window as any).IdentityProvider?.close?.()
+  if (FEDCM_LOGIN) {
+    ;(window as any).IdentityProvider?.close?.()
+    return
+  }
+  // The first account becomes the profile; later ones wait to be picked.
+  if (!currentProfile()) setProfile(profile.did)
+  else renderProfile()
 }
 
 async function removeAccount(did: Did) {
-  const res = await fetch(`/api/accounts/${encodeURIComponent(did)}`, {
-    method: 'DELETE',
-    credentials: 'same-origin',
-  })
-  accounts = (await res.json()).accounts
+  accounts = (await api<{ accounts: Account[] }>(`/api/accounts/${encodeURIComponent(did)}`, { method: 'DELETE' }))
+    .accounts
   if (!accounts.length) (navigator as any).login?.setStatus?.('logged-out')
-  for (const f of frames.values()) send(f, { proto: PROTO, type: 'sign-out', did })
-  renderAccounts()
+  for (const v of views.values()) send(v, { proto: PROTO, type: 'sign-out', did })
+  if (workspace.profile === did) setProfile(accounts[0]?.did ?? null)
+  else renderProfile()
 }
 
-function renderAccounts() {
-  const ul = $<HTMLUListElement>('#accounts')
-  ul.replaceChildren()
-  for (const a of accounts) {
-    const li = document.createElement('li')
-    li.title = `Switch every frame to ${a.handle}`
-    const avatar = a.avatar ? Object.assign(document.createElement('img'), { src: a.avatar, alt: '' }) : el('span', 'avatar')
-    const who = el('div', 'who')
-    const name = text('div', a.displayName || a.handle)
-    const unread = unreadTotals().get(a.did)
-    if (unread) name.append(' ', badge(unread, `${unread} unread across apps`))
-    who.append(name, text('div', `@${a.handle}`, 'handle'))
-    const rm = Object.assign(document.createElement('button'), { textContent: '×', title: `Remove ${a.handle}` })
-    rm.addEventListener('click', (e) => {
-      e.stopPropagation()
-      removeAccount(a.did)
-    })
-    li.append(avatar, who, rm)
-    li.addEventListener('click', () => {
-      for (const f of frames.values()) switchFrame(f, a)
-    })
-    ul.append(li)
-  }
-  for (const f of frames.values()) renderFrame(f)
+const currentProfile = () => accounts.find((a) => a.did === workspace.profile) ?? null
+
+function setProfile(did: Did | null) {
+  workspace.profile = did
+  saveWorkspace()
+  const account = currentProfile()
+  if (account) for (const v of views.values()) if (v.ready) switchView(v, account)
+  renderProfile()
 }
 
-// ---- frames --------------------------------------------------------------
-
-function openFrame(url: string, restore: Did | null = null, id = crypto.randomUUID()): Frame {
-  const tpl = $<HTMLTemplateElement>('#frame-tpl')
-  const el = tpl.content.firstElementChild!.cloneNode(true) as HTMLElement
-  const iframe = $<HTMLIFrameElement>('iframe', el)
-  const frame: Frame = {
-    id,
-    url,
-    origin: new URL(url).origin,
-    el,
-    iframe,
-    appName: new URL(url).host,
-    sessions: [],
-    active: null,
-    pending: null,
-    restore,
-    handles: [],
-    actions: [],
-    unread: new Map(),
-    queuedOpen: null,
-    ready: false,
-  }
-  iframe.src = url
-  $<HTMLButtonElement>('.close', el).addEventListener('click', () => closeFrame(frame))
-  $<HTMLSelectElement>('.account-select', el).addEventListener('change', (e) => {
-    const did = (e.target as HTMLSelectElement).value as Did
-    const a = accounts.find((x) => x.did === did)
-    if (a) switchFrame(frame, a)
-  })
-  frames.set(id, frame)
-  $('#frames').append(el)
-  renderFrame(frame)
-  saveFrames()
-  return frame
-}
-
-function closeFrame(f: Frame) {
-  frames.delete(f.id)
-  f.el.remove()
-  if (focus?.from === f) setFocus(f, null)
-  saveFrames()
-  renderAccounts()
-}
-
-function renderFrame(f: Frame) {
-  const name = $<HTMLElement>('.app-name', f.el)
-  name.textContent = f.appName
-  const shown = f.pending ?? f.active
-  const unread = shown ? f.unread.get(shown) : 0
-  if (unread) name.append(' ', badge(unread, `${unread} unread for this account`))
-  const select = $<HTMLSelectElement>('.account-select', f.el)
-  select.replaceChildren(
-    Object.assign(document.createElement('option'), { value: '', textContent: 'Choose account…', disabled: true }),
-    ...accounts.map((a) =>
-      Object.assign(document.createElement('option'), {
-        value: a.did,
-        textContent: `${a.handle}${f.sessions.includes(a.did) ? ' ✓' : ''}`,
-      }),
-    ),
-  )
-  select.value = f.pending ?? f.active ?? ''
-  const status = $<HTMLElement>('.status', f.el)
-  if (f.pending && f.pending !== f.active) {
-    status.textContent = 'sign-in needed in frame'
-    status.className = 'status warn'
-  } else if (f.active) {
-    status.textContent = `${f.sessions.length} session${f.sessions.length === 1 ? '' : 's'}`
-    status.className = 'status ok'
-  } else {
-    status.textContent = ''
-    status.className = 'status'
-  }
-}
-
-function send(f: Frame, msg: ShellToApp) {
-  // Always target the frame's own origin so a navigated-away frame gets nothing.
-  f.iframe.contentWindow?.postMessage(msg, f.origin)
+function switchView(v: View, a: Account) {
+  if (v.active === a.did && !v.needsSignIn) return
+  v.pending = a.did
+  send(v, { proto: PROTO, type: 'switch', account: { did: a.did, handle: a.handle } })
+  renderView(v)
 }
 
 function unreadTotals() {
-  return unreadByAccount([...frames.values()].map((f) => ({ origin: f.origin, counts: f.unread })))
+  return unreadByAccount([...views.values()].map((v) => ({ origin: v.origin, counts: v.unread })))
+}
+
+function renderProfile() {
+  const profile = currentProfile()
+  const totals = unreadTotals()
+
+  const btn = $<HTMLButtonElement>('#profile-btn')
+  btn.replaceChildren(avatar(profile))
+  btn.title = profile ? `Profile: @${profile.handle}` : 'Pick a profile'
+  const otherUnread = [...totals].filter(([did]) => did !== profile?.did).reduce((n, [, c]) => n + c, 0)
+  if (otherUnread) btn.append(badge(otherUnread, `${otherUnread} unread in your other profiles`))
+
+  const ul = $<HTMLUListElement>('#profiles')
+  ul.replaceChildren()
+  if (!accounts.length) ul.append(text('li', 'No accounts yet. Add a handle below.', 'none'))
+  for (const a of accounts) {
+    const li = document.createElement('li')
+    const pick = el('button', 'pick') as HTMLButtonElement
+    pick.setAttribute('role', 'menuitemradio')
+    pick.setAttribute('aria-checked', String(a.did === profile?.did))
+    const who = el('div', 'who')
+    const name = text('div', a.displayName || a.handle)
+    const n = totals.get(a.did)
+    if (n) name.append(' ', badge(n, `${n} unread across apps`))
+    who.append(name, text('div', `@${a.handle}`, 'handle'))
+    pick.append(avatar(a), who)
+    pick.addEventListener('click', () => {
+      setProfile(a.did)
+      $<HTMLElement>('#profile-menu').hidePopover()
+    })
+    const rm = Object.assign(el('button', 'rm') as HTMLButtonElement, { textContent: '×', title: `Remove ${a.handle}` })
+    rm.addEventListener('click', () => removeAccount(a.did))
+    li.append(pick, rm)
+    ul.append(li)
+  }
+  renderRail()
+}
+
+// ---- apps ----------------------------------------------------------------------
+
+async function addApp(input: string) {
+  const url = appUrl(input)
+  if (!url) throw new Error('Enter a web address, like https://app.example')
+  if (workspace.apps.length >= MAX_APPS) throw new Error(`The sidebar holds ${MAX_APPS} apps.`)
+  const app: SavedApp = { id: crypto.randomUUID(), url, name: new URL(url).host }
+  workspace.apps.push(app)
+  saveWorkspace()
+  const v = mountView(app, true)
+  select(app.id)
+  await check(v)
 }
 
 /**
- * Show an `at://` link in the app that handles it: an open frame if there
- * is one, else a new frame of an app seen before.
+ * Ask the shell's server whether the app's headers allow framing, and pick
+ * up its title and icon. Only a clear "no" stops the frame from loading.
  */
-function routeOpen(uri: AtUri, did: Did | undefined, from: Frame) {
-  const account = did && accounts.find((a) => a.did === did)
-  const msg: OpenMessage = {
+async function check(v: View) {
+  v.checking = true
+  renderView(v)
+  let probe: Probe | null = null
+  try {
+    probe = await api<Probe>(`/api/probe?url=${encodeURIComponent(v.app.url)}`)
+  } catch (err) {
+    console.warn('probe failed', err)
+  }
+  v.checking = false
+  if (!views.has(v.app.id)) return // removed meanwhile
+  if (probe?.icon && !v.app.icon) v.app.icon = probe.icon
+  if (probe?.title && (!v.app.name || v.app.name === new URL(v.app.url).host) && !v.ready) v.app.name = probe.title
+  if (probe?.frameable === false) {
+    v.app.blocked = probe.reason ?? 'The site refuses to be framed.'
+    unframe(v)
+  } else {
+    delete v.app.blocked
+    if (!v.iframe) frame(v)
+  }
+  saveWorkspace()
+  renderView(v)
+  renderRail()
+}
+
+function mountView(app: SavedApp, checking = false): View {
+  const el = ($<HTMLTemplateElement>('#app-tpl').content.firstElementChild!.cloneNode(true)) as HTMLElement
+  const v: View = {
+    app,
+    origin: new URL(app.url).origin,
+    el,
+    iframe: null,
+    ready: false,
+    plain: false,
+    checking,
+    sessions: [],
+    active: null,
+    pending: null,
+    needsSignIn: false,
+    handles: [],
+    unread: new Map(),
+  }
+  for (const a of el.querySelectorAll<HTMLAnchorElement>('a.newtab')) a.href = app.url
+  $<HTMLButtonElement>('.reload', el).addEventListener('click', () => (v.iframe ? frame(v) : check(v)))
+  $<HTMLButtonElement>('.remove', el).addEventListener('click', () => removeApp(v))
+  $<HTMLButtonElement>('.recheck', el).addEventListener('click', () => check(v))
+  views.set(app.id, v)
+  $('#stage').append(el)
+  // A blocked app stays a link until the user asks to check again. Anything
+  // else frames now; a new app waits for its check first.
+  if (!app.blocked && !checking) frame(v)
+  renderView(v)
+  return v
+}
+
+/** (Re)load the app's iframe. */
+function frame(v: View) {
+  unframe(v)
+  const iframe = document.createElement('iframe')
+  iframe.allow = 'identity-credentials-get'
+  iframe.title = v.app.name ?? v.origin
+  iframe.src = v.app.url
+  v.iframe = iframe
+  $('.blocked', v.el).before(iframe)
+  // `load` fires for a page and for the browser's own "refused to connect"
+  // page alike, so the only sign the app speaks the protocol is `hello`.
+  v.helloTimer = setTimeout(() => {
+    if (v.ready) return
+    v.plain = true
+    renderView(v)
+    renderRail()
+  }, HELLO_TIMEOUT_MS)
+}
+
+function unframe(v: View) {
+  clearTimeout(v.helloTimer)
+  v.iframe?.remove()
+  v.iframe = null
+  Object.assign(v, { ready: false, plain: false, sessions: [], active: null, pending: null, needsSignIn: false })
+  v.unread = new Map()
+}
+
+function removeApp(v: View) {
+  unframe(v)
+  v.el.remove()
+  views.delete(v.app.id)
+  workspace.apps = workspace.apps.filter((a) => a.id !== v.app.id)
+  saveWorkspace()
+  if (selected === v.app.id) select(workspace.apps[0]?.id ?? null)
+  renderProfile()
+}
+
+function select(id: string | null) {
+  selected = id
+  for (const v of views.values()) v.el.hidden = v.app.id !== id
+  $<HTMLElement>('#empty').hidden = id !== null
+  renderRail()
+}
+
+function renderRail() {
+  const profile = currentProfile()
+  const ul = $<HTMLUListElement>('#apps')
+  ul.replaceChildren()
+  for (const app of workspace.apps) {
+    const v = views.get(app.id)
+    if (!v) continue
+    const li = document.createElement('li')
+    const b = el('button', 'rail-app') as HTMLButtonElement
+    b.classList.toggle('selected', app.id === selected)
+    b.classList.toggle('trouble', Boolean(app.blocked))
+    b.title = `${app.name ?? v.origin}${app.blocked ? ' (opens in a new tab)' : ''}`
+    b.setAttribute('aria-label', b.title)
+    b.append(appIcon(app))
+    const shown = v.active ?? profile?.did
+    const n = shown ? v.unread.get(shown) : 0
+    if (n) b.append(badge(n, `${n} unread`))
+    b.addEventListener('click', () => select(app.id))
+    li.append(b)
+    ul.append(li)
+  }
+}
+
+function renderView(v: View) {
+  $<HTMLElement>('.app-name', v.el).textContent = v.app.name ?? v.origin
+  const status = $<HTMLElement>('.status', v.el)
+  const [msg, tone] = viewStatus(v)
+  status.textContent = msg
+  status.className = `status ${tone}`
+  status.title = msg
+
+  const blocked = $<HTMLElement>('.blocked', v.el)
+  blocked.hidden = !v.app.blocked
+  if (v.app.blocked) {
+    $<HTMLElement>('h2', blocked).textContent = `${v.app.name ?? v.origin} won't open inside atworkplace`
+    $<HTMLElement>('.why', blocked).textContent = v.app.blocked
+  }
+}
+
+function viewStatus(v: View): [string, '' | 'ok' | 'warn'] {
+  const profile = currentProfile()
+  const handle = (did: Did | null) => accounts.find((a) => a.did === did)?.handle ?? did
+  if (v.checking) return ['checking…', '']
+  if (v.app.blocked) return ['refuses to be framed', 'warn']
+  if (v.plain)
+    return [
+      "doesn't speak atworkplace/1, so it won't follow your profile. If it stays blank, it may refuse to be framed: open it in a new tab.",
+      'warn',
+    ]
+  if (!v.ready) return ['loading…', '']
+  if (v.needsSignIn && v.pending) return [`sign in as @${handle(v.pending)} in the app`, 'warn']
+  if (v.pending && v.pending !== v.active) return [`switching to @${handle(v.pending)}…`, '']
+  if (v.active && profile && v.active !== profile.did)
+    return [`as @${handle(v.active)}, not your profile @${profile.handle}`, 'warn']
+  if (v.active) return [`as @${handle(v.active)}`, 'ok']
+  return ['signed out', '']
+}
+
+function send(v: View, msg: ShellToApp) {
+  // Always target the app's own origin so a navigated-away frame gets nothing.
+  if (v.ready) v.iframe?.contentWindow?.postMessage(msg, v.origin)
+}
+
+function notice(v: View, message: string) {
+  const n = $<HTMLElement>('.notice', v.el)
+  n.textContent = message
+  n.hidden = false
+  setTimeout(() => (n.hidden = true), 6000)
+}
+
+/** Show an `at://` link in an app that handles its collection. */
+function routeOpen(uri: AtUri, did: Did | undefined, from: View) {
+  const target = pickFrame(
+    [...views.values()].filter((v) => v.ready).map((v) => ({ id: v.app.id, handles: v.handles, active: v.active, v })),
+    uri,
+    did ?? workspace.profile ?? undefined,
+  )?.v
+  if (!target) {
+    notice(from, "None of your apps opens that kind of record. Add one that does, and it'll open there.")
+    return
+  }
+  const account = accounts.find((a) => a.did === (did ?? workspace.profile))
+  if (account && target.active !== account.did) target.pending = account.did
+  send(target, {
     proto: PROTO,
     type: 'open',
     uri,
     ...(account ? { account: { did: account.did, handle: account.handle } } : {}),
-  }
-  let target = pickFrame(frames.values(), uri, did)
-  if (!target) {
-    const collection = collectionOf(uri)
-    const app = collection && knownApps().find((a) => handlesCollection(a.handles, collection))
-    if (!app) {
-      notice(`No app in this workspace opens ${collection ?? 'whole repos'}.`, from)
-      return
-    }
-    target = openFrame(app.url, did ?? null)
-  }
-  if (account && target.active !== account.did) target.pending = account.did
-  if (target.ready) send(target, msg)
-  else target.queuedOpen = msg
-  renderFrame(target)
-  if (target !== from) flash(target)
-}
-
-function notice(message: string, f: Frame) {
-  const n = $<HTMLElement>('.notice', f.el)
-  n.textContent = message
-  n.hidden = false
-  setTimeout(() => (n.hidden = true), 5000)
-}
-
-// ---- shared actions ---------------------------------------------------------
-
-/**
- * Offer `item` from frame `from` to the other apps' actions: a sheet lists
- * the actions that accept it, and the chosen app gets `perform`.
- */
-function offerItem(item: Item, did: Did | undefined, from: Frame) {
-  const options = actionsFor([...frames.values()], item, from.origin)
-  const dialog = $<HTMLDialogElement>('#act-sheet')
-  $<HTMLElement>('.act-title', dialog).textContent = item.title
-  $<HTMLElement>('.act-text', dialog).textContent = item.text ?? ''
-  const list = $<HTMLUListElement>('.act-options', dialog)
-  list.replaceChildren()
-  if (!options.length) list.append(text('li', 'No app in this workspace takes this.', 'hint'))
-  for (const { frame, action } of options) {
-    const li = document.createElement('li')
-    const b = document.createElement('button')
-    b.append(text('span', action.label), text('span', frame.appName, 'act-app'))
-    b.addEventListener('click', () => {
-      dialog.close()
-      perform(frame, action.id, item, did)
-    })
-    li.append(b)
-    list.append(li)
-  }
-  dialog.showModal()
-}
-
-function perform(target: Frame, action: string, item: Item, did: Did | undefined) {
-  // Act as the account the user was using, with the same rules as `switch`.
-  const account = did && accounts.find((a) => a.did === did)
-  send(target, {
-    proto: PROTO,
-    type: 'perform',
-    action,
-    item,
-    ...(account ? { account: { did: account.did, handle: account.handle } } : {}),
   })
-  if (account && target.active !== account.did) target.pending = account.did
-  renderFrame(target)
-  flash(target)
-  // An action usually adds something "about" the focused item (a note, a
-  // message), so ask again once the app has had a moment to save it.
-  setTimeout(queryContext, 400)
-}
-
-// ---- what links here ---------------------------------------------------------
-
-interface Focus {
-  from: Frame
-  item: Item
-  query: string
-  /** Answers per app origin, so two frames of one app count once. */
-  answers: Map<string, { appName: string; frame: Frame; items: Item[] }>
-}
-let focus: Focus | null = null
-
-function setFocus(from: Frame, item: Item | null) {
-  if (!item) {
-    if (focus?.from === from) focus = null
-    renderContext()
-    return
-  }
-  focus = { from, item, query: '', answers: new Map() }
-  queryContext()
-}
-
-/** Ask every other app what it has about the focused item. */
-function queryContext() {
-  if (!focus) return
-  focus.query = crypto.randomUUID()
-  focus.answers.clear()
-  for (const f of frames.values()) {
-    if (f.origin === focus.from.origin || !f.ready) continue
-    send(f, {
-      proto: PROTO,
-      type: 'context-query',
-      query: focus.query,
-      item: focus.item,
-      ...(f.active ? { did: f.active } : {}),
-    })
-  }
-  renderContext()
-}
-
-function renderContext() {
-  const section = $<HTMLElement>('#context')
-  section.hidden = !focus
-  if (!focus) return
-  $<HTMLElement>('.context-title', section).textContent = focus.item.title
-  const list = $<HTMLUListElement>('.context-items', section)
-  list.replaceChildren()
-  const answers = [...focus.answers.values()].filter((a) => a.items.length)
-  if (!answers.length) list.append(text('li', 'Nothing in the other apps yet.', 'hint'))
-  for (const { appName, frame, items } of answers) {
-    list.append(text('li', appName, 'context-app'))
-    for (const item of items) {
-      const li = document.createElement('li')
-      const b = document.createElement('button')
-      b.className = 'context-item'
-      b.append(text('span', item.title, 'context-item-title'))
-      if (item.text) b.append(text('span', item.text, 'context-item-text'))
-      b.addEventListener('click', () => {
-        if (item.uri) routeOpen(item.uri, frame.active ?? undefined, frame)
-        else if (item.url) window.open(item.url, '_blank', 'noopener')
-      })
-      li.append(b)
-      list.append(li)
-    }
-  }
-}
-
-function flash(target: Frame) {
-  target.el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
-  target.el.classList.remove('flash')
-  void target.el.offsetWidth // restart the animation
-  target.el.classList.add('flash')
-}
-
-function switchFrame(f: Frame, a: Account) {
-  f.pending = a.did
-  send(f, { proto: PROTO, type: 'switch', account: { did: a.did, handle: a.handle } })
-  renderFrame(f)
+  select(target.app.id)
+  renderView(target)
 }
 
 window.addEventListener('message', (event) => {
-  const frame = [...frames.values()].find((f) => f.iframe.contentWindow === event.source)
-  if (!frame || event.origin !== frame.origin) return
+  const v = [...views.values()].find((x) => x.iframe && x.iframe.contentWindow === event.source)
+  if (!v || event.origin !== v.origin) return
   const msg = parseAppToShell(event.data)
   if (!msg) return
   switch (msg.type) {
     case 'hello': {
-      frame.appName = msg.app.name
-      frame.sessions = msg.sessions
-      frame.active = msg.active
-      frame.handles = msg.handles ?? []
-      frame.actions = msg.actions ?? []
-      frame.ready = true
-      rememberApp({ url: frame.url, name: msg.app.name, handles: frame.handles })
-      // Frames of one app share storage, so the app's own "active" is
-      // whatever any frame picked last. Which account *this* frame shows is
-      // the shell's to remember.
-      const want = frame.restore && accounts.find((a) => a.did === frame.restore)
-      frame.restore = null
-      if (want && want.did !== msg.active && msg.sessions.includes(want.did)) switchFrame(frame, want)
-      if (frame.queuedOpen) {
-        send(frame, frame.queuedOpen)
-        frame.queuedOpen = null
+      clearTimeout(v.helloTimer)
+      v.ready = true
+      v.plain = false
+      v.sessions = msg.sessions
+      v.active = msg.active
+      v.handles = msg.handles ?? []
+      if (v.app.name !== msg.app.name) {
+        v.app.name = msg.app.name
+        saveWorkspace()
       }
-      queryContext()
+      // The workspace's profile wins. If the app has no session for it, the
+      // `switch` makes the app show its own "Continue as" prompt.
+      const profile = currentProfile()
+      if (profile && msg.active !== profile.did) switchView(v, profile)
       break
     }
-    case 'state': {
-      const switched = frame.active !== msg.active
-      frame.sessions = msg.sessions
-      frame.active = msg.active
-      if (frame.pending === msg.active) frame.pending = null
-      saveFrames()
-      // Another account has other things to say about the focused item.
-      if (switched && focus && focus.from !== frame) queryContext()
+    case 'state':
+      v.sessions = msg.sessions
+      v.active = msg.active
+      if (v.pending === msg.active) {
+        v.pending = null
+        v.needsSignIn = false
+      }
       break
-    }
     case 'needs-sign-in':
-      frame.pending = msg.did
+      v.pending = msg.did
+      v.needsSignIn = true
       break
     case 'unread':
-      frame.unread = new Map(msg.counts.filter((c) => c.count > 0).map((c) => [c.did, c.count]))
-      renderAccounts()
+      v.unread = new Map(msg.counts.filter((c) => c.count > 0).map((c) => [c.did, c.count]))
+      renderProfile()
       break
     case 'open':
-      routeOpen(msg.uri, msg.did, frame)
+      routeOpen(msg.uri, msg.did, v)
       break
     case 'act':
-      offerItem(msg.item, msg.did, frame)
+      notice(v, '"Send to…" isn\'t in the prototype yet. The demo at /demo/ has it.')
       break
     case 'focus':
-      setFocus(frame, msg.item)
-      break
     case 'context':
-      if (focus && msg.query === focus.query) {
-        focus.answers.set(frame.origin, { appName: frame.appName, frame, items: msg.items.slice(0, 20) })
-        renderContext()
-      }
+      // "What links here" is only in the demo so far.
       break
   }
-  renderFrame(frame)
+  renderView(v)
+  renderRail()
 })
 
-interface SavedFrame {
-  url: string
-  did: Did | null
-}
-
-function saveFrames() {
-  const saved: SavedFrame[] = [...frames.values()].map((f) => ({ url: f.url, did: f.active ?? f.restore }))
-  try {
-    localStorage.setItem('awp.frames', JSON.stringify(saved))
-  } catch {}
-}
-
-function knownApps(): KnownApp[] {
-  try {
-    const v = JSON.parse(localStorage.getItem('awp.apps') ?? '[]')
-    return Array.isArray(v) ? v.filter((a) => a && typeof a.url === 'string' && Array.isArray(a.handles)) : []
-  } catch {
-    return []
-  }
-}
-
-function rememberApp(app: KnownApp) {
-  const rest = knownApps().filter((a) => a.url !== app.url)
-  try {
-    localStorage.setItem('awp.apps', JSON.stringify([app, ...rest].slice(0, 50)))
-  } catch {}
-}
-
-/**
- * The demo app run as two apps: one shows posts, one shows profiles, so
- * links can travel between them.
- */
-const DEFAULT_FRAMES: SavedFrame[] = [
-  { url: `${APP_ORIGIN}/?name=Posts&handles=app.bsky.feed.post`, did: null },
-  { url: `${APP_ORIGIN}/?name=Profiles&handles=app.bsky.actor.profile`, did: null },
-]
-
-/** Mocked partner apps with fake data, to show actions and "what links here". */
-const MOCK_FRAMES: SavedFrame[] = [
-  { url: `${MOCK_ORIGINS.skyreader}/`, did: null },
-  { url: `${MOCK_ORIGINS.reams}/`, did: null },
-  { url: `${MOCK_ORIGINS.roomy}/`, did: null },
-]
-
-const PRESETS: Record<string, SavedFrame[]> = { demo: DEFAULT_FRAMES, mocks: MOCK_FRAMES }
-
-/** Replace the open frames with a preset. */
-function openPreset(saved: SavedFrame[]) {
-  for (const f of [...frames.values()]) closeFrame(f)
-  for (const f of saved) openFrame(f.url, f.did)
-}
-
-function restoreFrames(): SavedFrame[] {
-  try {
-    const v = JSON.parse(localStorage.getItem('awp.frames') ?? 'null')
-    if (Array.isArray(v) && v.length) {
-      // Older saves are plain URL strings.
-      return v.flatMap((x): SavedFrame[] =>
-        typeof x === 'string'
-          ? [{ url: x, did: null }]
-          : x && typeof x.url === 'string'
-            ? [{ url: x.url, did: typeof x.did === 'string' && x.did.startsWith('did:') ? (x.did as Did) : null }]
-            : [],
-      )
-    }
-  } catch {}
-  return DEFAULT_FRAMES
-}
-
-// ---- helpers & boot ------------------------------------------------------
+// ---- helpers & boot ---------------------------------------------------------------
 
 function el(tag: string, className?: string) {
   const e = document.createElement(tag)
@@ -526,45 +458,92 @@ function badge(n: number, title: string) {
   b.title = title
   return b
 }
-
-$<HTMLFormElement>('#add-account').addEventListener('submit', async (e) => {
-  e.preventDefault()
-  const form = e.target as HTMLFormElement
-  const input = form.elements.namedItem('handle') as HTMLInputElement
-  try {
-    await addAccount(input.value)
-    input.value = ''
-  } catch (err) {
-    alert(String(err instanceof Error ? err.message : err))
-  }
-})
-
-$<HTMLFormElement>('#add-frame').addEventListener('submit', (e) => {
-  e.preventDefault()
-  const input = (e.target as HTMLFormElement).elements.namedItem('url') as HTMLInputElement
-  try {
-    openFrame(new URL(input.value).href)
-    input.value = ''
-  } catch {
-    alert('Enter a full URL, like http://127.0.0.1:5171/')
-  }
-})
-;($<HTMLInputElement>('#add-frame input')).value = `${APP_ORIGIN}/`
-
-for (const b of document.querySelectorAll<HTMLButtonElement>('[data-preset]')) {
-  b.addEventListener('click', () => openPreset(PRESETS[b.dataset.preset!] ?? DEFAULT_FRAMES))
+function avatar(a: Account | null) {
+  if (a?.avatar) return Object.assign(document.createElement('img'), { src: a.avatar, alt: '' })
+  return text('span', (a?.displayName || a?.handle || '?').slice(0, 1).toUpperCase(), 'avatar')
 }
-$<HTMLButtonElement>('#act-sheet .act-cancel').addEventListener('click', () => $<HTMLDialogElement>('#act-sheet').close())
+function appIcon(app: SavedApp) {
+  const letter = text('span', (app.name ?? new URL(app.url).host).replace(/^www\./, '').slice(0, 1), 'letter')
+  if (!app.icon) return letter
+  const img = Object.assign(document.createElement('img'), { src: app.icon, alt: '' })
+  img.addEventListener('error', () => img.replaceWith(letter))
+  return img
+}
 
-await loadAccounts()
-const preset = PRESETS[new URLSearchParams(location.search).get('preset') ?? '']
-if (FEDCM_LOGIN) {
-  // The browser opened login_url (with ?fedcm-login=1) because an app asked
-  // for an account and the shell had none. Don't open frames in this popup.
+/** Apps to try from the empty state: ones that speak the protocol, and two that don't. */
+const SUGGESTIONS: { label: string; url: string; note?: string }[] = [
+  { label: 'Demo app', url: `${APP_ORIGIN}/` },
+  { label: 'Skyreader', url: `${MOCK_ORIGINS.skyreader}/`, note: 'mock' },
+  { label: 'Reams', url: `${MOCK_ORIGINS.reams}/`, note: 'mock' },
+  { label: 'Roomy', url: `${MOCK_ORIGINS.roomy}/`, note: 'mock' },
+  { label: 'example.com', url: 'https://example.com/', note: 'plain page' },
+  { label: 'github.com', url: 'https://github.com/', note: 'refuses framing' },
+]
+
+function renderSuggestions() {
+  const ul = $<HTMLUListElement>('#suggestions')
+  for (const s of SUGGESTIONS) {
+    const b = el('button', 'secondary') as HTMLButtonElement
+    b.append(s.label)
+    if (s.note) b.append(text('span', s.note, 'note'))
+    b.addEventListener('click', () => addApp(s.url).catch(alertError))
+    const li = document.createElement('li')
+    li.append(b)
+    ul.append(li)
+  }
+}
+
+function alertError(err: unknown) {
+  alert(err instanceof Error ? err.message : String(err))
+}
+
+for (const form of document.querySelectorAll<HTMLFormElement>('form[data-add-app]')) {
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const input = form.elements.namedItem('url') as HTMLInputElement
+    try {
+      $<HTMLDialogElement>('#add-app').close()
+      await addApp(input.value)
+      input.value = ''
+    } catch (err) {
+      alertError(err)
+    }
+  })
+}
+for (const form of document.querySelectorAll<HTMLFormElement>('form[data-add-account]')) {
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const input = form.elements.namedItem('handle') as HTMLInputElement
+    try {
+      await addAccount(input.value)
+      input.value = ''
+    } catch (err) {
+      alertError(err)
+    }
+  })
+}
+$<HTMLButtonElement>('#add-app-btn').addEventListener('click', () => {
+  $<HTMLDialogElement>('#add-app').showModal()
+})
+$<HTMLButtonElement>('#add-app [data-close]').addEventListener('click', () => $<HTMLDialogElement>('#add-app').close())
+
+if (params.has('preset')) {
+  // Presets belong to the demo, which used to live here.
+  location.replace(`/demo/${location.search}`)
+} else if (FEDCM_LOGIN) {
+  // The browser opened login_url because an app asked for an account and
+  // the shell had none. Don't open apps in this popup.
   $<HTMLElement>('#fedcm-login').hidden = false
-} else if (preset) {
-  openPreset(preset)
-  history.replaceState(null, '', location.pathname)
+  document.body.classList.add('popup')
 } else {
-  for (const f of restoreFrames()) openFrame(f.url, f.did)
+  renderSuggestions()
+  const [acc, ws] = await Promise.all([
+    api<{ accounts: Account[] }>('/api/accounts'),
+    api<SavedWorkspace>('/api/workspace'),
+  ])
+  accounts = acc.accounts
+  workspace = ws
+  for (const app of workspace.apps) mountView(app)
+  select(workspace.apps[0]?.id ?? null)
+  renderProfile()
 }

@@ -5,6 +5,7 @@ import {
   acceptsItem,
   collectionOf,
   handlesCollection,
+  isDid,
   type ActionDecl,
   type AtUri,
   type Did,
@@ -70,4 +71,61 @@ export function actionsFor<F extends ActingFrame>(
     for (const action of frame.actions) if (acceptsItem(action.accepts, item)) out.push({ frame, action })
   }
   return out
+}
+
+// ---- the prototype's saved workspace -------------------------------------------
+
+/** An app the user added to the prototype by URL. */
+export interface SavedApp {
+  id: string
+  url: string
+  /** From the app's `hello`, or the page title. */
+  name?: string
+  icon?: string
+  /** Why the shell's server thinks the app refuses to be framed. */
+  blocked?: string
+}
+
+/** What the prototype keeps per shell session: its apps and the chosen profile. */
+export interface SavedWorkspace {
+  apps: SavedApp[]
+  profile: Did | null
+}
+
+export const MAX_APPS = 30
+
+const str = (v: unknown, max: number) => (typeof v === 'string' && v.length <= max ? v : undefined)
+
+/** The URL as the shell will frame it, or null if it isn't an http(s) URL. */
+export function appUrl(input: string): string | null {
+  const raw = input.trim()
+  if (!raw) return null
+  // People type "bsky.app"; treat a bare host as https.
+  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`
+  try {
+    const u = new URL(withScheme)
+    return (u.protocol === 'https:' || u.protocol === 'http:') && u.hostname ? u.href : null
+  } catch {
+    return null
+  }
+}
+
+/** Validates a workspace sent by the page, dropping what doesn't fit. */
+export function parseWorkspace(v: unknown): SavedWorkspace | null {
+  if (!v || typeof v !== 'object') return null
+  const { apps, profile } = v as Record<string, unknown>
+  if (!Array.isArray(apps) || apps.length > MAX_APPS) return null
+  const out: SavedApp[] = []
+  for (const a of apps) {
+    if (!a || typeof a !== 'object') return null
+    const id = str(a.id, 64)
+    const url = typeof a.url === 'string' && a.url.length <= 2048 ? appUrl(a.url) : null
+    if (!id || !url) return null
+    const name = str(a.name, 80)
+    const icon = typeof a.icon === 'string' && a.icon.length <= 2048 ? appUrl(a.icon) : null
+    const blocked = str(a.blocked, 300)
+    out.push({ id, url, ...(name ? { name } : {}), ...(icon ? { icon } : {}), ...(blocked ? { blocked } : {}) })
+  }
+  if (profile != null && !isDid(profile)) return null
+  return { apps: out, profile: profile ?? null }
 }

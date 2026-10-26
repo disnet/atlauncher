@@ -120,7 +120,8 @@ npm run dev
 
 | | URL |
 |---|---|
-| Shell | http://localhost:5170 |
+| Shell: the prototype | http://localhost:5170 |
+| Shell: the protocol demo | http://localhost:5170/demo/ |
 | Demo app (framed by the shell) | http://127.0.0.1:5171 |
 | Mock PDS login (Phase 2) | http://localhost:5172/login |
 | Mock apps: Skyreader, Reams, Roomy | http://127.0.0.1:5173, :5174, :5175 |
@@ -147,6 +148,27 @@ The shell and mock PDS set `SameSite=None; Secure` cookies. Chrome treats
 `http://localhost` as a secure context, so this works without HTTPS.
 
 ## Try it
+
+**The prototype** (the shell's main page) is a thin sidebar of apps and one
+profile for the whole workspace:
+
+1. Click **+** in the sidebar (or a suggestion on the empty page) and enter
+   an app's URL. One app shows at a time; the others stay loaded so their
+   badges keep coming.
+2. Add an account with the profile button at the bottom of the sidebar.
+   Picking a profile switches every app that speaks atworkplace/1 to it.
+   An app that holds no session for it shows its own "Continue as" prompt.
+3. Apps and the profile are saved with the shell session, so they come
+   back after a reload.
+4. Sites that don't speak atworkplace/1 still open, as plain pages that
+   don't follow the profile. Sites whose headers refuse framing
+   (`X-Frame-Options`, CSP `frame-ancestors`) show why, with a link to open
+   them in a new tab. The suggestions include one of each.
+
+"Send to…" and "What links here" are only in the demo for now.
+
+**The protocol demo** is at `/demo/`, linked from the sidebar. The steps
+below use it.
 
 **Phase 1:**
 
@@ -175,8 +197,8 @@ and "Profiles".
    Profiles frame. Paste an `at://` post URI in Profiles to see it open in
    Posts.
 
-**Mock apps:** click **Reading & notes** under Workspaces (or open the
-shell with `?preset=mocks`). It opens mock versions of Skyreader, Reams and
+**Mock apps:** click **Reading & notes** under Workspaces (or open
+`/demo/?preset=mocks`). It opens mock versions of Skyreader, Reams and
 Roomy. They use fake data and fake sessions, and only exist to show
 cross-app features. Pick an account in the sidebar, then:
 
@@ -199,6 +221,9 @@ these should show, and what has actually been observed, is in
 ```
 protocol/messages.ts   shell ↔ app messages and FedCM token formats, with validators
 shell/                 the atworkplace page, and its FedCM IdP endpoints (Phase 1)
+  src/main.ts          the prototype at /: sidebar of apps by URL, profile switcher
+  src/demo.ts          the protocol demo at /demo/
+  probe.ts             server-side check of whether an app's headers allow framing
 app/                   the demo framed app: multi-session OAuth, popup relay, Phase 2 client
 mocks/                 mock Skyreader, Reams and Roomy with fake data, one origin each
 mock-pds/              PDS-style auth server that speaks FedCM + DPoP (Phase 2)
