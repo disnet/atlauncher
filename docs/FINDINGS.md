@@ -75,9 +75,10 @@ want the Storage Access API or a per-app explanation.
   the mock PDS's. Chrome allows one. Chromium 153 also warns that, when
   `client_metadata` is used, the well-known file must repeat
   `accounts_endpoint` and `login_url` (a hard requirement from Chrome 145).
-  **Fix (expected to work, needs a re-check in Chrome):** each IdP's
-  well-known names only its own config plus those two endpoints. With that,
-  both IdPs show the chooser from the frame in Chromium 153.
+  **Fix:** each IdP's well-known names only its own config plus those two
+  endpoints. **Observed working (Chrome, version not yet recorded,
+  2026-10-26, Tim):** the shell's chooser appears in the frame and the app
+  receives the account hint.
 - **Expected (from the Playwright run):** Chrome fetches the well-known
   file at `http://localhost:<port>/`, so the
   `fedcm-without-well-known-enforcement` flag may not be needed. Still to
