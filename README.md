@@ -74,7 +74,8 @@ The shell and mock PDS set `SameSite=None; Secure` cookies. Chrome treats
 and "Profiles".
 
 1. With an account signed in, click **+1 unread** next to it in either
-   frame. The badge shows on both frames and on the account in the sidebar.
+   frame. A badge shows on each frame using that account and on the account
+   in the sidebar.
 2. Under **Links** in Posts, open the account's profile. It opens in the
    Profiles frame. Paste an `at://` post URI in Profiles to see it open in
    Posts.
