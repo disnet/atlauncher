@@ -77,9 +77,19 @@ wrangler(['d1', 'execute', prefix, '--remote', '--file', join(root, 'deploy', 's
 // ---- build and deploy ------------------------------------------------------
 
 await build({ origins, names, db: { name: db.name, id: db.uuid }, accountId })
+// Asset uploads sometimes fail with a 401 from the upload endpoint, so a
+// failed deploy gets one more try.
 for (const site of SITES) {
-  console.log(`deploying ${names[site]}`)
-  process.stdout.write(wrangler(['deploy'], { cwd: join(OUT, site) }))
+  for (let attempt = 1; ; attempt++) {
+    console.log(`deploying ${names[site]}${attempt > 1 ? ` (attempt ${attempt})` : ''}`)
+    try {
+      process.stdout.write(wrangler(['deploy'], { cwd: join(OUT, site) }))
+      break
+    } catch (err) {
+      if (attempt >= 2) throw err
+      await new Promise((r) => setTimeout(r, 10_000))
+    }
+  }
 }
 
 console.log(`

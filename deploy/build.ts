@@ -73,7 +73,6 @@ export async function build(cfg: BuildConfig) {
     const config = {
       name: cfg.names[site],
       main: 'worker.js',
-      no_bundle: true,
       compatibility_date: '2025-09-01',
       workers_dev: true,
       ...(cfg.accountId ? { account_id: cfg.accountId } : {}),
