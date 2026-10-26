@@ -12,7 +12,7 @@ import { Agent } from '@atproto/api'
 import { BrowserOAuthClient, type OAuthSession } from '@atproto/oauth-client-browser'
 import { APP_ORIGIN, PDS_ORIGIN, SHELL_ORIGIN } from '../../lib/config.ts'
 import { parsePdsAssertion, parseShellAssertion, type Did } from '../../protocol/messages.ts'
-import { CLIENT_ID, IS_LOOPBACK, REDIRECT_URI, SCOPE, clientMetadata } from '../oauth-client.ts'
+import { APPVIEW, CLIENT_ID, IS_LOOPBACK, REDIRECT_URI, SCOPE, clientMetadata } from '../oauth-client.ts'
 import { dpopProof, generateDpopKey, pkcePair, type DpopKey } from './dpop.ts'
 import { idbDel, idbGet, idbSet } from './idb.ts'
 import { log } from './log.ts'
@@ -53,6 +53,16 @@ export const getActive = async () => (await idbGet<Did>(ACTIVE_KEY)) ?? null
 export const setActive = (did: Did | null) => (did ? idbSet(ACTIVE_KEY, did) : idbDel(ACTIVE_KEY))
 
 // ---- Phase 1: real atproto OAuth -----------------------------------------
+
+/**
+ * An Agent that names the AppView in atproto-proxy, so the PDS checks each
+ * call against the matching `rpc:…?aud=` scope.
+ */
+function appviewAgent(session: OAuthSession) {
+  const agent = new Agent(session)
+  agent.configureProxy(APPVIEW)
+  return agent
+}
 
 let clientP: Promise<BrowserOAuthClient> | undefined
 export function oauthClient() {
@@ -173,7 +183,7 @@ async function waitForRelay(key: string, popup: Window): Promise<URLSearchParams
 }
 
 async function finishAtproto(session: OAuthSession): Promise<SessionEntry> {
-  const agent = new Agent(session)
+  const agent = appviewAgent(session)
   const { data } = await agent.getProfile({ actor: session.did })
   const entry: SessionEntry = { did: session.did as Did, handle: data.handle, kind: 'atproto' }
   await putSession(entry)
@@ -310,7 +320,7 @@ export async function getProfile(e: SessionEntry): Promise<Profile> {
   if (e.kind === 'mock') return mockGetProfile(e.did)
   const client = await oauthClient()
   const session = await client.restore(e.did)
-  const { data } = await new Agent(session).getProfile({ actor: e.did })
+  const { data } = await appviewAgent(session).getProfile({ actor: e.did })
   return data as Profile
 }
 
@@ -321,7 +331,7 @@ export async function getProfile(e: SessionEntry): Promise<Profile> {
 export async function getUnreadCount(e: SessionEntry): Promise<number> {
   if (e.kind === 'mock') return 0
   const session = await (await oauthClient()).restore(e.did)
-  const { data } = await new Agent(session).app.bsky.notification.getUnreadCount()
+  const { data } = await appviewAgent(session).app.bsky.notification.getUnreadCount()
   return data.count
 }
 
@@ -343,7 +353,7 @@ export async function forceRefresh(e: SessionEntry) {
   const session = await (await oauthClient()).restore(e.did, false)
   const before = await session.getTokenInfo(false)
   const after = await session.getTokenInfo(true)
-  await new Agent(session).getProfile({ actor: e.did })
+  await appviewAgent(session).getProfile({ actor: e.did })
   log('forced refresh (atproto), profile call ok', {
     did: e.did,
     expiresBefore: before.expiresAt?.toISOString(),

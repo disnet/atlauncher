@@ -45,6 +45,17 @@ and keeps polling the relay until the 5-minute deadline. The cost: if the
 user really closes the popup, the frame waits out the deadline (another
 click starts a fresh sign-in).
 
+### Granular scopes
+
+**Expected:** the demo app asks for `atproto` plus two `rpc:` scopes, for
+`app.bsky.actor.getProfile` and `app.bsky.notification.getUnreadCount` with
+`aud=did:web:api.bsky.app#bsky_appview`, instead of `transition:generic`.
+Its Agent sends `atproto-proxy` naming that AppView so the PDS can match
+each call to its scope. bsky.social should show a narrower consent screen,
+and both calls should still succeed. Sessions granted `transition:generic`
+earlier keep working until they are signed out. To check: sign in fresh
+and watch the badges and the profile card.
+
 ## 2. Two frames of the same app
 
 **Expected:** both frames share one partition (same app origin, same top-level

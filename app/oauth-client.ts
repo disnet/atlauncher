@@ -9,7 +9,16 @@
 import type { OAuthClientMetadataInput } from '@atproto/oauth-client-browser'
 import { APP_ORIGIN } from '../lib/config.ts'
 
-export const SCOPE = 'atproto transition:generic'
+// Granular scopes: only the two calls the demo makes through the user's
+// PDS, both to the Bluesky AppView (getProfile at sign-in, unread counts
+// for the badges). Plain `atproto` would let it call neither.
+export const APPVIEW = 'did:web:api.bsky.app#bsky_appview'
+const APPVIEW_AUD = APPVIEW.replace('#', '%23')
+export const SCOPE = [
+  'atproto',
+  `rpc:app.bsky.actor.getProfile?aud=${APPVIEW_AUD}`,
+  `rpc:app.bsky.notification.getUnreadCount?aud=${APPVIEW_AUD}`,
+].join(' ')
 // Typed as https for the OAuth library; locally it is http://127.0.0.1, which
 // loopback clients may use.
 export const REDIRECT_URI = `${APP_ORIGIN}/callback.html` as `https://${string}`
