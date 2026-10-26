@@ -52,6 +52,15 @@ site). Sessions added in one appear in the other after a reload, and the
 library's refresh locks coordinate across them. Open the demo app twice in
 the shell to check.
 
+**Observed (Chrome, version not yet recorded, 2026-10-26, Tim):** a second
+frame of the demo app lists every account signed in to the first, and each
+frame can switch between them. But after reloading the shell, both frames
+come back on whichever account was picked last, in either frame. The
+*active* account lives in the same shared IndexedDB as the sessions, so
+frames overwrite each other's choice. Which account a frame shows is
+per-frame state, and shared storage can't hold it. Refresh across frames
+is not checked yet.
+
 ## 3. Sessions inside vs outside the shell
 
 **Expected:** signing in to the demo app at top level
@@ -59,6 +68,10 @@ the shell to check.
 sessions, because the framed copy's storage is keyed by the shell's site. To
 users that looks like being "logged out" in the shell. A real deployment would
 want the Storage Access API or a per-app explanation.
+
+**Observed (Chrome, version not yet recorded, 2026-10-26, Tim):** the demo
+app opened at top level shows none of the accounts signed in inside the
+shell.
 
 ## 4. FedCM in the frame
 
