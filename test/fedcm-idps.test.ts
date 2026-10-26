@@ -25,8 +25,18 @@ const cookieFrom = (res: Response) => (res.headers.get('set-cookie') ?? '').spli
 test('shell: config and well-known', async () => {
   const cfg = await (await fetch(`${SHELL_ORIGIN}/fedcm/config.json`)).json()
   assert.equal(cfg.id_assertion_endpoint, `${SHELL_ORIGIN}/fedcm/assertion`)
-  const wk = await (await fetch(`${SHELL_ORIGIN}/.well-known/web-identity`)).json()
-  assert.ok(wk.provider_urls.includes(`${SHELL_ORIGIN}/fedcm/config.json`))
+})
+
+test('both IdPs: well-known names exactly their own config and endpoints', async () => {
+  // Chrome rejects a well-known file with more than one config URL, and wants
+  // accounts_endpoint and login_url repeated when client_metadata is used.
+  for (const origin of [SHELL_ORIGIN, PDS_ORIGIN]) {
+    const cfg = await (await fetch(`${origin}/fedcm/config.json`)).json()
+    const wk = await (await fetch(`${origin}/.well-known/web-identity`)).json()
+    assert.deepEqual(wk.provider_urls, [`${origin}/fedcm/config.json`])
+    assert.equal(wk.accounts_endpoint, cfg.accounts_endpoint)
+    assert.equal(wk.login_url, cfg.login_url)
+  }
 })
 
 test('shell: accounts → assertion returns a hint for the chosen DID', async () => {

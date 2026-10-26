@@ -105,7 +105,12 @@ const cors = {
 export const fedcm: Handler = async (req, res, url) => {
   const p = url.pathname
   if (p === '/.well-known/web-identity') {
-    json(res, 200, { provider_urls: [`${PDS_ORIGIN}/fedcm/config.json`] })
+    // One config URL only; with client_metadata, Chrome also wants these two.
+    json(res, 200, {
+      provider_urls: [`${PDS_ORIGIN}/fedcm/config.json`],
+      accounts_endpoint: `${PDS_ORIGIN}/fedcm/accounts`,
+      login_url: `${PDS_ORIGIN}/login?fedcm-login=1`,
+    })
     return true
   }
   if (p === '/fedcm/config.json') {
