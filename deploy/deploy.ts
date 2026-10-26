@@ -9,6 +9,7 @@
 // e.g. for custom domains.
 
 import { execFileSync } from 'node:child_process'
+import { appendFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, OUT, SITES, type Origins, type SiteName } from './build.ts'
@@ -86,3 +87,8 @@ console.log(`
   demo app            ${origins.app}
   mock PDS (phase 2)  ${origins.pds}/login
 `)
+
+// In GitHub Actions, hand the origins to later steps (.github/workflows/deploy.yml).
+if (process.env.GITHUB_OUTPUT) {
+  appendFileSync(process.env.GITHUB_OUTPUT, `origins=${JSON.stringify(origins)}\nshell=${origins.shell}\n`)
+}

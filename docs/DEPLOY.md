@@ -46,6 +46,24 @@ Run it again to redeploy. Options, as environment variables:
 - `SHELL_ORIGIN`, `APP_ORIGIN`, `PDS_ORIGIN`: use these origins instead of
   workers.dev, for custom domains. Add the routes in Cloudflare yourself.
 
+## From GitHub Actions
+
+`.github/workflows/deploy.yml` runs the typecheck and tests on every push
+and pull request. On pushes to `main` (or a manual run of the workflow) it
+then runs `npm run deploy` and the HTTP tests below against the deployment.
+
+It needs two repository secrets, under Settings → Secrets and variables →
+Actions:
+
+- `CLOUDFLARE_API_TOKEN`: a token made from the "Edit Cloudflare Workers"
+  template, with D1: Edit added.
+- `CLOUDFLARE_ACCOUNT_ID`: the account to deploy to.
+
+Until both are set, the deploy job is skipped with a warning. The tests it
+runs after deploying add a test account (`did:plc:testalice`) to a fresh
+shell session in the deployed D1 each time; nobody sees it, since sessions
+are keyed by a cookie.
+
 ## Check it
 
 ```sh
