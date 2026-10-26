@@ -1,4 +1,4 @@
-// Builds the three Workers into deploy/out/<site>/: the server bundle
+// Builds the Workers into deploy/out/<site>/: the server bundle
 // (worker.js), the static files (public/), and a wrangler.json naming the
 // D1 database. The deployed origins are baked into both bundles.
 
@@ -6,18 +6,15 @@ import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as esbuild from 'esbuild'
+import { MOCK_APPS, type MockApp } from '../lib/config.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 export const OUT = join(root, 'deploy', 'out')
 
-export type SiteName = 'shell' | 'app' | 'pds'
-export const SITES: SiteName[] = ['shell', 'app', 'pds']
+export type SiteName = 'shell' | 'app' | 'pds' | MockApp
+export const SITES: SiteName[] = ['shell', 'app', 'pds', ...MOCK_APPS]
 
-export interface Origins {
-  shell: string
-  app: string
-  pds: string
-}
+export type Origins = Record<SiteName, string>
 
 export interface BuildConfig {
   origins: Origins
@@ -27,7 +24,11 @@ export interface BuildConfig {
 }
 
 /** Which source directory holds each site's static files. */
-const PUBLIC: Partial<Record<SiteName, string>> = { shell: 'shell/public', app: 'app/public' }
+const PUBLIC: Partial<Record<SiteName, string>> = {
+  shell: 'shell/public',
+  app: 'app/public',
+  ...Object.fromEntries(MOCK_APPS.map((m) => [m, 'mocks/public'])),
+}
 
 export async function build(cfg: BuildConfig) {
   rmSync(OUT, { recursive: true, force: true })
@@ -39,6 +40,8 @@ export async function build(cfg: BuildConfig) {
       'shell/public/dist/main': 'shell/src/main.ts',
       'app/public/dist/main': 'app/src/main.ts',
       'app/public/dist/callback': 'app/src/callback.ts',
+      // One bundle serves every mock app; each Worker gets its own copy.
+      ...Object.fromEntries(MOCK_APPS.map((m) => [`${m}/public/dist/main`, 'mocks/src/main.ts'])),
     },
     outdir: OUT,
     absWorkingDir: root,

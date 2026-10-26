@@ -23,6 +23,29 @@
         </p>
       </section>
 
+      <section id="context" class="context" hidden>
+        <h2>What links here</h2>
+        <p class="context-title"></p>
+        <ul class="context-items"></ul>
+        <p class="hint">
+          Each app answers for itself, and only to the shell, so private
+          notes stay private.
+        </p>
+      </section>
+
+      <section>
+        <h2>Workspaces</h2>
+        <div class="presets">
+          <button data-preset="demo" class="secondary">Demo app</button>
+          <button data-preset="mocks" class="secondary">Reading &amp; notes</button>
+        </div>
+        <p class="hint">
+          "Reading &amp; notes" opens mock versions of Skyreader, Reams and
+          Roomy, with fake data, to show actions and "what links here" across
+          apps. Pick an account in the sidebar to start.
+        </p>
+      </section>
+
       <section>
         <h2>Frames</h2>
         <form id="add-frame" class="inline-form">
@@ -43,6 +66,14 @@
     </aside>
 
     <main id="frames" class="frames"></main>
+
+    <dialog id="act-sheet" class="act-sheet">
+      <h2>Send to…</h2>
+      <p class="act-title"></p>
+      <p class="act-text"></p>
+      <ul class="act-options"></ul>
+      <button class="act-cancel secondary">Cancel</button>
+    </dialog>
 
     <template id="frame-tpl">
       <article class="frame">

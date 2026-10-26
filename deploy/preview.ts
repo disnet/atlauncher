@@ -5,19 +5,21 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { build, OUT, SITES, type SiteName } from './build.ts'
+import { MOCK_APPS } from '../lib/config.ts'
+import { build, OUT, SITES, type Origins, type SiteName } from './build.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const WRANGLER = join(root, 'node_modules', '.bin', 'wrangler')
 const STATE = join(root, 'deploy', '.wrangler-state')
 
-const ports: Record<SiteName, number> = { shell: 8780, app: 8781, pds: 8782 }
+const ports: Record<SiteName, number> = { shell: 8780, app: 8781, pds: 8782, skyreader: 8783, reams: 8784, roomy: 8785 }
 const origins = {
   shell: `http://localhost:${ports.shell}`,
   app: `http://127.0.0.1:${ports.app}`,
   pds: `http://localhost:${ports.pds}`,
-}
-const names = { shell: 'atworkplace-shell', app: 'atworkplace-app', pds: 'atworkplace-pds' }
+  ...Object.fromEntries(MOCK_APPS.map((m) => [m, `http://127.0.0.1:${ports[m]}`])),
+} as Origins
+const names = Object.fromEntries(SITES.map((s) => [s, `atworkplace-${s}`])) as Record<SiteName, string>
 
 await build({ origins, names, db: { name: 'atworkplace', id: 'local' } })
 
@@ -38,4 +40,5 @@ console.log(`
   atworkplace shell   ${origins.shell}
   demo app            ${origins.app}
   mock PDS (phase 2)  ${origins.pds}/login
+  mock apps           ${MOCK_APPS.map((m) => origins[m]).join(', ')}
 `)

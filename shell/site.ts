@@ -8,7 +8,7 @@
 //     still signs in with real atproto OAuth against that account's PDS.
 
 import { base64url } from 'jose'
-import { APP_ORIGIN, PDS_ORIGIN, SHELL_ORIGIN } from '../lib/config.ts'
+import { APP_ORIGIN, MOCK_ORIGINS, PDS_ORIGIN, SHELL_ORIGIN } from '../lib/config.ts'
 import {
   fedcmCors,
   getCookie,
@@ -196,6 +196,8 @@ export function shellSite(tables: Tables): Site {
     name: 'shell',
     handlers: [fedcm, api],
     // The shell page frames apps; only it decides what it may frame.
-    assetHeaders: () => ({ 'content-security-policy': `frame-src ${APP_ORIGIN} ${PDS_ORIGIN} https:` }),
+    assetHeaders: () => ({
+      'content-security-policy': `frame-src ${APP_ORIGIN} ${PDS_ORIGIN} ${Object.values(MOCK_ORIGINS).join(' ')} https:`,
+    }),
   }
 }

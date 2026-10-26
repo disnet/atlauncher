@@ -1,7 +1,15 @@
-// Pure helpers for the shell's cross-app features: routing `open` requests
-// and adding up unread counts. Kept free of the DOM so tests can run them.
+// Pure helpers for the shell's cross-app features: routing `open` requests,
+// adding up unread counts and finding actions for an item. Kept free of the DOM so tests can run them.
 
-import { collectionOf, handlesCollection, type AtUri, type Did } from '../../protocol/messages.ts'
+import {
+  acceptsItem,
+  collectionOf,
+  handlesCollection,
+  type ActionDecl,
+  type AtUri,
+  type Did,
+  type Item,
+} from '../../protocol/messages.ts'
 
 export interface RoutableFrame {
   id: string
@@ -36,4 +44,30 @@ export function unreadByAccount(reports: Iterable<UnreadReport>): Map<Did, numbe
     for (const [did, n] of counts) totals.set(did, (totals.get(did) ?? 0) + n)
   }
   return totals
+}
+
+export interface ActingFrame {
+  origin: string
+  active: Did | null
+  actions: readonly ActionDecl[]
+}
+
+/**
+ * The actions other apps offer for `item`, one entry per app origin and
+ * action, never from the app that offered it. For an app open in several
+ * frames, the first frame wins.
+ */
+export function actionsFor<F extends ActingFrame>(
+  frames: Iterable<F>,
+  item: Item,
+  fromOrigin: string,
+): { frame: F; action: ActionDecl }[] {
+  const seen = new Set<string>()
+  const out: { frame: F; action: ActionDecl }[] = []
+  for (const frame of frames) {
+    if (frame.origin === fromOrigin || seen.has(frame.origin)) continue
+    seen.add(frame.origin)
+    for (const action of frame.actions) if (acceptsItem(action.accepts, item)) out.push({ frame, action })
+  }
+  return out
 }

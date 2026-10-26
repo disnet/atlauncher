@@ -1,17 +1,19 @@
-// Deploys the demo to Cloudflare as three Workers, one per origin, sharing
-// one D1 database. Creates the database on first run. See docs/DEPLOY.md.
+// Deploys the demo to Cloudflare as Workers, one per origin, sharing one D1
+// database. Creates the database on first run. See docs/DEPLOY.md.
 //
 //   CLOUDFLARE_ACCOUNT_ID=… npm run deploy
 //
 // Optional: ATWORKPLACE_PREFIX (default "atworkplace") names the Workers
-// <prefix>-shell, <prefix>-app, <prefix>-pds and the database <prefix>.
-// SHELL_ORIGIN, APP_ORIGIN and PDS_ORIGIN override the workers.dev URLs,
-// e.g. for custom domains.
+// <prefix>-shell, <prefix>-app, <prefix>-pds, <prefix>-skyreader (and the
+// other mock apps) and the database <prefix>.
+// SHELL_ORIGIN, APP_ORIGIN, PDS_ORIGIN, SKYREADER_ORIGIN and so on override
+// the workers.dev URLs, e.g. for custom domains.
 
 import { execFileSync } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { MOCK_APPS } from '../lib/config.ts'
 import { build, OUT, SITES, type Origins, type SiteName } from './build.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -52,14 +54,11 @@ async function workersSubdomain() {
 }
 
 const env = process.env
-const needsSubdomain = !(env.SHELL_ORIGIN && env.APP_ORIGIN && env.PDS_ORIGIN)
-const sub = needsSubdomain ? await workersSubdomain() : ''
-const dev = (site: SiteName) => `https://${names[site]}.${sub}.workers.dev`
-const origins: Origins = {
-  shell: env.SHELL_ORIGIN ?? dev('shell'),
-  app: env.APP_ORIGIN ?? dev('app'),
-  pds: env.PDS_ORIGIN ?? dev('pds'),
-}
+const override = (site: SiteName) => env[`${site.toUpperCase()}_ORIGIN`]
+const sub = SITES.every(override) ? '' : await workersSubdomain()
+const origins = Object.fromEntries(
+  SITES.map((s) => [s, override(s) ?? `https://${names[s]}.${sub}.workers.dev`]),
+) as Origins
 
 // ---- D1 --------------------------------------------------------------------
 
@@ -96,6 +95,7 @@ console.log(`
   atworkplace shell   ${origins.shell}
   demo app            ${origins.app}
   mock PDS (phase 2)  ${origins.pds}/login
+  mock apps           ${MOCK_APPS.map((m) => origins[m]).join(', ')}
 `)
 
 // In GitHub Actions, hand the origins to later steps (.github/workflows/deploy.yml).

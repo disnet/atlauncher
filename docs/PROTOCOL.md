@@ -30,6 +30,9 @@ Every message has `proto: "atworkplace/1"` and a `type`.
 | `needs-sign-in` | `did` | after a `switch` the app can't complete without a click |
 | `unread` | `counts: { did, count }[]` | whenever its unread counts change, as a full snapshot |
 | `open` | `uri: AtUri`, `did?` | the user followed an `at://` link the app wants the workspace to show |
+| `act` | `item: Item`, `did?` | the user wants to hand `item` to another app ("Send to…") |
+| `focus` | `item: Item \| null` | the frame now shows `item`, or nothing in particular |
+| `context` | `query`, `items: Item[]` | reply to `context-query` |
 
 ## Shell → app
 
@@ -38,6 +41,8 @@ Every message has `proto: "atworkplace/1"` and a `type`.
 | `switch` | `account: { did, handle }` | make it active, or prompt "Continue as @handle" |
 | `sign-out` | `did` | revoke and forget that account's session in the app |
 | `open` | `uri: AtUri`, `account?: { did, handle }` | show that record, as that account if given (same rules as `switch`) |
+| `perform` | `action`, `item: Item`, `account?` | run one of the app's declared actions on `item` |
+| `context-query` | `query`, `item: Item`, `did?` | ask what the app has about `item`, for account `did` |
 
 Which account a frame shows belongs to the shell. Frames of the same app
 share storage, so an app's own idea of "active" is whatever any of its
@@ -67,6 +72,33 @@ does. If it knows none, it tells the user. The shell sends the chosen frame
 
 An app decides which links to hand to the shell. Links to its own records
 can stay inside the app.
+
+## Shared actions
+
+An `Item` is something one app can hand another: `{ title, uri?, url?, text? }`,
+a record, a web page, or both. `text` carries extra content such as a
+highlighted quote.
+
+`hello` may list `actions`: `{ id, label, accepts }`, where `accepts` holds
+collection patterns (as in `handles`) and `url` for anything with a web URL.
+When an app sends `act`, the shell shows the user every action from *other*
+apps that accepts the item, one entry per app. The user picks one, and the
+shell sends that app `perform` with the action's `id`, the item, and the
+account the user was acting as. The handling app does the work in its own
+frame, with its own session, and the source app never learns who handled it.
+
+## What links here
+
+A frame sends `focus` when it shows something the user picked: an article,
+a note, a message. The shell then sends every other app `context-query`
+with a fresh `query` id and the frame's own account, and lists the `context`
+replies in its sidebar. Items with a `uri` open through the same routing as
+`open`. Replies to an old `query` are dropped.
+
+The reply goes only to the shell, never to the app that asked, so an app can
+answer from private data (notes that were never published) without leaking
+it. The shell asks again when a frame switches account, and shortly after a
+`perform`, since an action usually adds something about the focused item.
 
 ## FedCM tokens
 

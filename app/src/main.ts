@@ -71,6 +71,8 @@ window.addEventListener('message', async (event) => {
   if (event.source !== window.parent || !TRUSTED_SHELLS.includes(event.origin)) return
   const msg = parseShellToApp(event.data)
   if (!msg) return
+  // This app offers no actions and has nothing to say about other apps' records.
+  if (msg.type === 'perform' || msg.type === 'context-query') return
   log(`shell → ${msg.type}`, msg.type === 'switch' ? msg.account : msg.type === 'open' ? msg : msg.did)
 
   if (msg.type === 'switch') {

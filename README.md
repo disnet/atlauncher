@@ -86,8 +86,10 @@ apps that don't support them yet.
 3. Opening `at://` links in the app that handles that record type (in the
    demo).
 4. Shared actions, such as "post this from account X" or "save this to
-   Semble", sent from one app and handled by another.
-5. One-click sign-in once PDSes support FedCM.
+   Semble", sent from one app and handled by another (in the mock apps).
+5. "What links here": for whatever a frame shows, what the other apps have
+   about it, including private notes (in the mock apps).
+6. One-click sign-in once PDSes support FedCM.
 
 
 ## How the prototype works
@@ -121,6 +123,7 @@ npm run dev
 | Shell | http://localhost:5170 |
 | Demo app (framed by the shell) | http://127.0.0.1:5171 |
 | Mock PDS login (Phase 2) | http://localhost:5172/login |
+| Mock apps: Skyreader, Reams, Roomy | http://127.0.0.1:5173, :5174, :5175 |
 
 The app runs on `127.0.0.1` so it can use an atproto *loopback* OAuth client
 (no hosted client metadata needed), and so it is cross-site from the shell and
@@ -128,7 +131,7 @@ gets partitioned storage, like a real deployment would.
 
 ### Deployed
 
-`npm run deploy` puts the three parts on Cloudflare Workers, each on its
+`npm run deploy` puts each part on Cloudflare Workers, on its
 own workers.dev subdomain. See [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ### Chrome setup
@@ -172,6 +175,20 @@ and "Profiles".
    Profiles frame. Paste an `at://` post URI in Profiles to see it open in
    Posts.
 
+**Mock apps:** click **Reading & notes** under Workspaces (or open the
+shell with `?preset=mocks`). It opens mock versions of Skyreader, Reams and
+Roomy. They use fake data and fake sessions, and only exist to show
+cross-app features. Pick an account in the sidebar, then:
+
+1. Open an article in Skyreader. The sidebar's **What links here** lists
+   your Reams notes and the Roomy messages about it.
+2. Select a sentence and click **Send highlight…**, then **Take a note in
+   Reams**. The note appears in Reams and in What links here.
+3. Click **Send to…** and share the article to a Roomy channel.
+4. In Roomy's #reading, click the "CRDT notes" card. It opens in Reams.
+5. Watch the badges: Skyreader counts unread articles, Roomy unread
+   messages, and a few messages arrive while you watch.
+
 **Things to look for:** open the demo app twice in the shell; compare it
 with the app opened at top level; read the event log in each frame. What
 these should show, and what has actually been observed, is in
@@ -183,6 +200,7 @@ these should show, and what has actually been observed, is in
 protocol/messages.ts   shell ↔ app messages and FedCM token formats, with validators
 shell/                 the atworkplace page, and its FedCM IdP endpoints (Phase 1)
 app/                   the demo framed app: multi-session OAuth, popup relay, Phase 2 client
+mocks/                 mock Skyreader, Reams and Roomy with fake data, one origin each
 mock-pds/              PDS-style auth server that speaks FedCM + DPoP (Phase 2)
   */site.ts            each server's routes, runtime-neutral (Fetch API Request/Response)
   */server.ts          runs it under Node for npm run dev
