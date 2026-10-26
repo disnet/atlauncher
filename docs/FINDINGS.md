@@ -38,7 +38,8 @@ first version of the relay treated that as "Sign-in window closed" and gave
 up, so finishing sign-in in the popup did nothing. This fits COOP putting
 the popup in a new browsing context group, which also severs the opener.
 
-**Fix (expected to work, needs a re-check):** `waitForRelay` no longer
+**Fix (observed working, Chrome, version not yet recorded, 2026-10-26,
+Tim):** `waitForRelay` no longer
 trusts `popup.closed`. It logs "popup handle reports closed (COOP?)" once
 and keeps polling the relay until the 5-minute deadline. The cost: if the
 user really closes the popup, the frame waits out the deadline (another
