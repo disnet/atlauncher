@@ -38,7 +38,8 @@ first version of the relay treated that as "Sign-in window closed" and gave
 up, so finishing sign-in in the popup did nothing. This fits COOP putting
 the popup in a new browsing context group, which also severs the opener.
 
-**Fix (expected to work, needs a re-check):** `waitForRelay` no longer
+**Fix (observed working, Chrome, version not yet recorded, 2026-10-26,
+Tim):** `waitForRelay` no longer
 trusts `popup.closed`. It logs "popup handle reports closed (COOP?)" once
 and keeps polling the relay until the 5-minute deadline. The cost: if the
 user really closes the popup, the frame waits out the deadline (another
@@ -65,9 +66,24 @@ want the Storage Access API or a per-app explanation.
   without it `navigator.credentials.get` rejects with a permissions error.
 - **Expected:** after the FedCM call, the click's user activation is used up,
   so the Phase 1 OAuth popup needs a second click. Phase 2 has no popup.
-- **To check:** whether Chrome on localhost needs the well-known check
-  disabled (see README), and whether `params` reaches the assertion endpoint
-  in the installed Chrome version.
+- **Observed (Chrome, version not yet recorded, 2026-10-26, Tim):**
+  "Choose from atworkplace" failed right away with "Error retrieving a
+  token." and no account chooser.
+  Diagnosed in Playwright's Chromium 153 without the well-known flag, which
+  logs "Provider's FedCM well-known file contains too many config URLs."
+  The shell's `/.well-known/web-identity` listed both its own config and
+  the mock PDS's. Chrome allows one. Chromium 153 also warns that, when
+  `client_metadata` is used, the well-known file must repeat
+  `accounts_endpoint` and `login_url` (a hard requirement from Chrome 145).
+  **Fix (expected to work, needs a re-check in Chrome):** each IdP's
+  well-known names only its own config plus those two endpoints. With that,
+  both IdPs show the chooser from the frame in Chromium 153.
+- **Expected (from the Playwright run):** Chrome fetches the well-known
+  file at `http://localhost:<port>/`, so the
+  `fedcm-without-well-known-enforcement` flag may not be needed. Still to
+  check in Chrome, along with whether `params` reaches the assertion
+  endpoint (the Phase 2 code exchange worked in Chromium 153, which needs
+  them).
 
 ## Open questions for a real FedCM profile (Phase 2)
 

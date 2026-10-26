@@ -41,11 +41,12 @@ gets partitioned storage, like a real deployment would.
 
 ### Chrome setup
 
-FedCM normally requires the identity provider to publish
-`/.well-known/web-identity` at the root of its registrable domain. On
-`localhost` with a port, Chrome can't find it there. If Chrome rejects the
-FedCM call with a well-known or config error, enable
+FedCM requires the identity provider to publish `/.well-known/web-identity`
+naming exactly one config URL. Each local IdP serves its own on its port,
+and in Chromium 153 that was enough without any flag. If Chrome still
+rejects the FedCM call with a well-known or config error, enable
 `chrome://flags/#fedcm-without-well-known-enforcement` and restart Chrome.
+The DevTools console of the framed app names the exact reason.
 
 The shell and mock PDS set `SameSite=None; Secure` cookies. Chrome treats
 `http://localhost` as a secure context, so this works without HTTPS.

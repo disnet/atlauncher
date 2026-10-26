@@ -72,10 +72,15 @@ export const fedcm: Handler = async (req, res, url) => {
   const p = url.pathname
 
   if (p === '/.well-known/web-identity') {
-    // Chrome looks for this at the root of the IdP's registrable domain.
-    // On localhost with a port it won't find it there; see README for the
-    // Chrome flag that skips this check during development.
-    json(res, 200, { provider_urls: [configUrl, `${PDS_ORIGIN}/fedcm/config.json`] })
+    // Chrome allows exactly one config URL here; listing the mock PDS's too
+    // fails every FedCM call with "contains too many config URLs". Because
+    // the IdP uses client_metadata, Chrome also wants accounts_endpoint and
+    // login_url repeated here.
+    json(res, 200, {
+      provider_urls: [configUrl],
+      accounts_endpoint: `${SHELL_ORIGIN}/fedcm/accounts`,
+      login_url: `${SHELL_ORIGIN}/?fedcm-login=1`,
+    })
     return true
   }
 
