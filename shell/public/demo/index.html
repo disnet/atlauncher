@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>atworkplace demo</title>
+    <link rel="stylesheet" href="/shell.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <header class="brand">atworkplace demo <a class="back" href="/">← prototype</a></header>
+
+      <section>
+        <h2>Accounts</h2>
+        <ul id="accounts" class="accounts"></ul>
+        <form id="add-account" class="inline-form">
+          <input name="handle" placeholder="handle.bsky.social" autocomplete="off" required />
+          <button>Add</button>
+        </form>
+        <p class="hint">
+          Adding an account here only names it. Each app still signs in to it
+          with atproto OAuth, and the account's PDS has the final say.
+        </p>
+      </section>
+
+      <section id="context" class="context" hidden>
+        <h2>What links here</h2>
+        <p class="context-title"></p>
+        <ul class="context-items"></ul>
+        <p class="hint">
+          Each app answers for itself, and only to the shell, so private
+          notes stay private.
+        </p>
+      </section>
+
+      <section>
+        <h2>Workspaces</h2>
+        <div class="presets">
+          <button data-preset="demo" class="secondary">Demo app</button>
+          <button data-preset="mocks" class="secondary">Reading &amp; notes</button>
+        </div>
+        <p class="hint">
+          "Reading &amp; notes" opens mock versions of Skyreader, Reams and
+          Roomy, with fake data, to show actions and "what links here" across
+          apps. Pick an account in the sidebar to start.
+        </p>
+      </section>
+
+      <section>
+        <h2>Frames</h2>
+        <form id="add-frame" class="inline-form">
+          <input name="url" placeholder="App URL" autocomplete="off" required />
+          <button>Open</button>
+        </form>
+        <p class="hint">
+          The demo app opens twice, as "Posts" and "Profiles". A link opened in
+          one shows up in the other. Open the same URL twice to see two frames
+          of one app share a storage partition.
+        </p>
+      </section>
+
+      <p id="fedcm-login" class="banner" hidden>
+        The browser sent you here to sign in to atworkplace. Add an account,
+        then go back to the app and try again.
+      </p>
+    </aside>
+
+    <main id="frames" class="frames"></main>
+
+    <dialog id="act-sheet" class="act-sheet">
+      <h2>Send to…</h2>
+      <p class="act-title"></p>
+      <p class="act-text"></p>
+      <ul class="act-options"></ul>
+      <button class="act-cancel secondary">Cancel</button>
+    </dialog>
+
+    <template id="frame-tpl">
+      <article class="frame">
+        <header>
+          <span class="app-name">loading…</span>
+          <select class="account-select" aria-label="Account for this frame"></select>
+          <span class="status"></span>
+          <button class="close" title="Close frame" aria-label="Close frame">×</button>
+        </header>
+        <p class="notice" role="status" hidden></p>
+        <iframe allow="identity-credentials-get"></iframe>
+      </article>
+    </template>
+
+    <script type="module" src="/dist/demo.js"></script>
+  </body>
+</html>

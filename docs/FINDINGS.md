@@ -160,6 +160,45 @@ Not deployed or checked yet (see docs/DEPLOY.md). What to look for:
   stay single-use and refresh tokens rotate across isolates. The HTTP tests
   pass against the deploy build under `wrangler dev` with a local D1.
 
+## 6. Apps added by URL (the prototype)
+
+The prototype at `/` lets people frame any app by URL, so it meets sites
+that never heard of atworkplace. Seen so far only in Playwright's Chromium
+153 against local test servers; still to check in Chrome against real
+sites and on workers.dev.
+
+- **Expected:** a cross-origin frame the browser refuses to load, because of
+  `X-Frame-Options` or CSP `frame-ancestors`, can't be told apart from one
+  that loaded. `load` fires either way (on Chrome's own error page) and both
+  are opaque. So the shell's server fetches the URL and reads those headers
+  (`shell/probe.ts`) before framing a new app, and shows "won't open inside
+  atworkplace" with the header and a new-tab link instead of a blank frame.
+  In Playwright Chromium 153 a local server sending `X-Frame-Options: DENY`
+  got that card.
+- **Expected:** the probe is only a guess. Headers can differ between the
+  server's fetch and the browser's (cookies, user agent, geography), and a
+  page can redirect somewhere stricter. When the probe can't tell (network
+  error, non-2xx), the shell frames the app anyway.
+- **Expected:** on workers.dev, the shell Worker fetching another Worker on
+  the same account (the demo and mock apps) may get a Cloudflare error
+  instead of the page. That reads as "can't tell", so those apps still
+  frame, just without a title or icon from the probe.
+- **Expected:** a site that frames fine but doesn't speak atworkplace/1
+  sends no `hello`. After six seconds the shell labels it a plain page that
+  won't follow the profile, and mentions that a blank frame may mean it
+  refused framing after all. Seen in Playwright Chromium 153 with a plain
+  local page.
+- **Expected:** the profile is workspace-wide, so on `hello` the shell sends
+  `switch` even when the app has no session for the profile. The demo app
+  then shows "Sign in as @handle in this app?" and sends `needs-sign-in`,
+  and the sidebar says to sign in inside the app. Seen in Playwright
+  Chromium 153 with a mock account; not yet with a real sign-in.
+- **Expected, from response headers (curl, 2026-10-26):** bsky.app sends
+  `X-Frame-Options: SAMEORIGIN`, so it gets the new-tab card. leaflet.pub
+  and tangled.org send neither header, so they should frame, as plain pages
+  until they speak atworkplace/1. Whether they work once framed (their own
+  sign-in in a partitioned frame, §1 and §3) is still to check.
+
 ## Open questions for a real FedCM profile (Phase 2)
 
 - **Discovery:** an app can't hard-code every PDS's config URL. Options are

@@ -50,6 +50,12 @@ frames picked last. The shell saves each frame's account with its URL. When
 a restored frame sends `hello` with a different `active`, the shell sends
 `switch` for the saved account, if the frame has a session for it.
 
+The prototype shell at `/` has one profile for the whole workspace instead
+of an account per frame. After a frame's `hello`, it sends `switch` for the
+profile whenever `active` differs, even without a session for it, so the
+app shows its own "Continue as" prompt. A frame that sends no `hello` within
+a few seconds is treated as a plain page: the shell sends it nothing.
+
 ## Unread badges
 
 An app reports unread counts per account in `unread`. An account left out

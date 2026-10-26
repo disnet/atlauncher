@@ -38,6 +38,7 @@ export async function build(cfg: BuildConfig) {
   await esbuild.build({
     entryPoints: {
       'shell/public/dist/main': 'shell/src/main.ts',
+      'shell/public/dist/demo': 'shell/src/demo.ts',
       'app/public/dist/main': 'app/src/main.ts',
       'app/public/dist/callback': 'app/src/callback.ts',
       // One bundle serves every mock app; each Worker gets its own copy.
