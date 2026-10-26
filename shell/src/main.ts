@@ -181,7 +181,7 @@ function renderProfile() {
 
 async function addApp(input: string) {
   const url = appUrl(input)
-  if (!url) throw new Error('Enter a web address, like https://app.example')
+  if (!url || url.length > 2048) throw new Error('Enter a web address, like https://app.example')
   if (workspace.apps.length >= MAX_APPS) throw new Error(`The sidebar holds ${MAX_APPS} apps.`)
   const app: SavedApp = { id: crypto.randomUUID(), url, name: new URL(url).host }
   workspace.apps.push(app)
@@ -206,6 +206,13 @@ async function check(v: View) {
   }
   v.checking = false
   if (!views.has(v.app.id)) return // removed meanwhile
+  // Follow a redirect to another origin (http → https, bare → www) before
+  // framing, so the app's messages come from the origin the shell expects.
+  if (probe && !v.iframe && new URL(probe.url).origin !== v.origin && appUrl(probe.url)) {
+    v.app.url = probe.url
+    v.origin = new URL(probe.url).origin
+    for (const a of v.el.querySelectorAll<HTMLAnchorElement>('a.newtab')) a.href = probe.url
+  }
   if (probe?.icon && !v.app.icon) v.app.icon = probe.icon
   if (probe?.title && (!v.app.name || v.app.name === new URL(v.app.url).host) && !v.ready) v.app.name = probe.title
   if (probe?.frameable === false) {
@@ -238,7 +245,12 @@ function mountView(app: SavedApp, checking = false): View {
     unread: new Map(),
   }
   for (const a of el.querySelectorAll<HTMLAnchorElement>('a.newtab')) a.href = app.url
-  $<HTMLButtonElement>('.reload', el).addEventListener('click', () => (v.iframe ? frame(v) : check(v)))
+  $<HTMLButtonElement>('.reload', el).addEventListener('click', () => {
+    if (!v.iframe) return void check(v)
+    frame(v)
+    renderView(v)
+    renderProfile()
+  })
   $<HTMLButtonElement>('.remove', el).addEventListener('click', () => removeApp(v))
   $<HTMLButtonElement>('.recheck', el).addEventListener('click', () => check(v))
   views.set(app.id, v)
@@ -305,7 +317,7 @@ function renderRail() {
     const b = el('button', 'rail-app') as HTMLButtonElement
     b.classList.toggle('selected', app.id === selected)
     b.classList.toggle('trouble', Boolean(app.blocked))
-    b.title = `${app.name ?? v.origin}${app.blocked ? ' (opens in a new tab)' : ''}`
+    b.title = `${app.name ?? v.origin}${app.blocked ? " (won't open inside atworkplace)" : ''}`
     b.setAttribute('aria-label', b.title)
     b.append(appIcon(app))
     const shown = v.active ?? profile?.did

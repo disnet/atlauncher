@@ -45,6 +45,8 @@ const loginStatus = (accounts: ShellAccount[]) =>
   ({ 'set-login': accounts.length ? 'logged-in' : 'logged-out' }) as Record<string, string>
 
 const configUrl = `${SHELL_ORIGIN}/fedcm/config.json`
+/** In local development the prototype may frame other local servers too. */
+const LOCAL_FRAMES = SHELL_ORIGIN.startsWith('http:') ? ' http://localhost:* http://127.0.0.1:*' : ''
 
 /** Session id → that browser's accounts. */
 export const SHELL_TABLE = 'shell_accounts'
@@ -213,6 +215,9 @@ export function shellSite(tables: Tables): Site {
 
     // Whether an app's headers let this shell frame it (see probe.ts).
     if (url.pathname === '/api/probe' && req.method === 'GET') {
+      // Only the shell page may ask, so the server isn't a fetch relay for
+      // anything that leaves out Sec-Fetch-Site.
+      if (req.headers.get('sec-fetch-site') !== 'same-origin') return json(403, { error: 'same-origin only' }, headers)
       const target = appUrl(url.searchParams.get('url') ?? '')
       if (!target) return json(400, { error: 'http(s) url required' }, headers)
       return json(200, await probe(target, SHELL_ORIGIN), headers)
@@ -232,7 +237,7 @@ export function shellSite(tables: Tables): Site {
     // The shell page frames apps; only it decides what it may frame. The
     // prototype frames any https app, and local http ones in development.
     assetHeaders: () => ({
-      'content-security-policy': `frame-src ${APP_ORIGIN} ${PDS_ORIGIN} ${Object.values(MOCK_ORIGINS).join(' ')} https: http://localhost:* http://127.0.0.1:*`,
+      'content-security-policy': `frame-src ${APP_ORIGIN} ${PDS_ORIGIN} ${Object.values(MOCK_ORIGINS).join(' ')} https:${LOCAL_FRAMES}`,
     }),
   }
 }

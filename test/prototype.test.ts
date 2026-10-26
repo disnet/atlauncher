@@ -51,6 +51,15 @@ test('framingVerdict reads X-Frame-Options and frame-ancestors', () => {
   assert.equal(verdict({ 'content-security-policy': 'frame-ancestors https://shell.example:8443' }), false)
   // frame-ancestors overrides X-Frame-Options, as in browsers.
   assert.equal(verdict({ 'x-frame-options': 'DENY', 'content-security-policy': `frame-ancestors ${shell}` }), true)
+  // Each policy must allow it; duplicate X-Frame-Options count too.
+  assert.equal(verdict({ 'content-security-policy': "frame-ancestors *, frame-ancestors 'none'" }), false)
+  assert.equal(verdict({ 'x-frame-options': 'SAMEORIGIN, SAMEORIGIN' }), false)
+  const long = framingVerdict(
+    new Headers({ 'content-security-policy': `frame-ancestors ${Array.from({ length: 40 }, (_, i) => `https://s${i}.example`).join(' ')}` }),
+    app,
+    shell,
+  )
+  assert.ok(long.reason && long.reason.length <= 300)
   // Without frame-ancestors, other CSP directives don't matter.
   assert.equal(verdict({ 'content-security-policy': "default-src 'none'" }), true)
 })
@@ -80,7 +89,13 @@ after(() => target.close())
 test('shell API: workspace round-trips per session, probe reports framing', async () => {
   const site = shellSite(memoryTables())
   const call = (path: string, init: RequestInit = {}, cookie = '') =>
-    dispatch(site, new Request(`http://localhost:5170${path}`, { ...init, headers: { cookie, ...(init.headers ?? {}) } }))
+    dispatch(
+      site,
+      new Request(`http://localhost:5170${path}`, {
+        ...init,
+        headers: { cookie, 'sec-fetch-site': 'same-origin', ...(init.headers ?? {}) },
+      }),
+    )
 
   const first = await call('/api/workspace')
   assert.deepEqual(await first.json(), { apps: [], profile: null })
@@ -106,6 +121,9 @@ test('shell API: workspace round-trips per session, probe reports framing', asyn
   const down = await (await call('/api/probe?url=http%3A%2F%2F127.0.0.1%3A1%2F', {}, cookie)).json()
   assert.equal(down.frameable, null)
   assert.equal((await call('/api/probe?url=javascript%3A1', {}, cookie)).status, 400)
+  // Not a fetch relay for clients that leave out Sec-Fetch-Site.
+  const bare = await dispatch(site, new Request(`http://localhost:5170/api/probe?url=${encodeURIComponent(targetUrl)}`, { headers: { cookie } }))
+  assert.equal(bare.status, 403)
 
   assert.equal((await call('/demo')).headers.get('location'), '/demo/')
 })

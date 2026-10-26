@@ -29,33 +29,38 @@ export function framingVerdict(
   shellOrigin: string,
 ): { frameable: boolean; reason?: string } {
   const sameOrigin = appOrigin === shellOrigin
-  const ancestors = frameAncestors(headers.get('content-security-policy'))
-  if (ancestors) {
-    if (ancestors.some((s) => sourceMatches(s, shellOrigin, appOrigin))) return { frameable: true }
-    return { frameable: false, reason: `Content-Security-Policy: frame-ancestors ${ancestors.join(' ') || "'none'"}` }
+  const policies = frameAncestors(headers.get('content-security-policy'))
+  if (policies.length) {
+    // Every policy that sets frame-ancestors must allow the shell.
+    const refusing = policies.find((sources) => !sources.some((s) => sourceMatches(s, shellOrigin, appOrigin)))
+    if (!refusing) return { frameable: true }
+    return { frameable: false, reason: clip(`Content-Security-Policy: frame-ancestors ${refusing.join(' ') || "'none'"}`) }
   }
-  const xfo = headers.get('x-frame-options')?.trim().toLowerCase()
-  if (xfo === 'deny') return { frameable: false, reason: 'X-Frame-Options: DENY' }
-  if (xfo === 'sameorigin' && !sameOrigin) return { frameable: false, reason: 'X-Frame-Options: SAMEORIGIN' }
+  // Duplicate headers arrive joined with commas; the strictest value wins.
+  const xfo = (headers.get('x-frame-options') ?? '').toLowerCase().split(',').map((v) => v.trim())
+  if (xfo.includes('deny')) return { frameable: false, reason: 'X-Frame-Options: DENY' }
+  if (xfo.includes('sameorigin') && !sameOrigin) return { frameable: false, reason: 'X-Frame-Options: SAMEORIGIN' }
   return { frameable: true }
 }
 
-/** The frame-ancestors sources across every policy in the header, or null if none sets it. */
-function frameAncestors(csp: string | null): string[] | null {
-  if (!csp) return null
-  // Several policies may be joined with commas; each one must allow framing.
-  // Returning the sources of the first that sets frame-ancestors is enough
-  // for a prototype.
-  for (const policy of csp.split(',')) {
+/** The frame-ancestors sources of each policy in the header that sets it. */
+function frameAncestors(csp: string | null): string[][] {
+  const out: string[][] = []
+  // Several policies may be joined with commas.
+  for (const policy of csp?.split(',') ?? []) {
     for (const directive of policy.split(';')) {
       const [name, ...sources] = directive.trim().split(/\s+/)
       if (name?.toLowerCase() === 'frame-ancestors') {
-        return sources.filter((s) => s.toLowerCase() !== "'none'")
+        out.push(sources.filter((s) => s.toLowerCase() !== "'none'"))
+        break
       }
     }
   }
-  return null
+  return out
 }
+
+/** Reasons are saved with the app, which caps them at 300 characters. */
+const clip = (s: string) => (s.length > 300 ? `${s.slice(0, 299)}…` : s)
 
 function sourceMatches(source: string, origin: string, appOrigin: string): boolean {
   const s = source.toLowerCase()
