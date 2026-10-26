@@ -30,8 +30,9 @@
           <button>Open</button>
         </form>
         <p class="hint">
-          Open the demo app twice to see two frames of the same app share one
-          storage partition.
+          The demo app opens twice, as "Posts" and "Profiles". A link opened in
+          one shows up in the other. Open the same URL twice to see two frames
+          of one app share a storage partition.
         </p>
       </section>
 
@@ -51,6 +52,7 @@
           <span class="status"></span>
           <button class="close" title="Close frame" aria-label="Close frame">×</button>
         </header>
+        <p class="notice" role="status" hidden></p>
         <iframe allow="identity-credentials-get"></iframe>
       </article>
     </template>

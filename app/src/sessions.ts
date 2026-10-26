@@ -314,6 +314,17 @@ export async function getProfile(e: SessionEntry): Promise<Profile> {
 }
 
 /**
+ * Unread Bluesky notifications for a real account, through its PDS. Mock
+ * PDS accounts have no notifications, so they report 0.
+ */
+export async function getUnreadCount(e: SessionEntry): Promise<number> {
+  if (e.kind === 'mock') return 0
+  const session = await (await oauthClient()).restore(e.did)
+  const { data } = await new Agent(session).app.bsky.notification.getUnreadCount()
+  return data.count
+}
+
+/**
  * Dev aid for FINDINGS: refresh this account's tokens now instead of waiting
  * for them to expire, then make an authenticated call with the new ones.
  * Run it in one frame, then the other, to see whether frames that share a

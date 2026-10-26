@@ -7,11 +7,16 @@
 import {
   PROTO,
   parseAppToShell,
+  collectionOf,
+  handlesCollection,
   type AccountRef,
+  type AtUri,
   type Did,
+  type OpenMessage,
   type ShellToApp,
 } from '../../protocol/messages.ts'
 import { APP_ORIGIN } from '../../lib/config.ts'
+import { pickFrame, unreadByAccount } from './workspace.ts'
 
 interface Account extends AccountRef {
   displayName?: string
@@ -30,6 +35,19 @@ interface Frame {
   pending: Did | null
   /** Account this frame showed before a reload; restored after its `hello`. */
   restore: Did | null
+  /** Collections the app said it can show. */
+  handles: string[]
+  unread: Map<Did, number>
+  /** An `open` to deliver once the frame has said `hello`. */
+  queuedOpen: OpenMessage | null
+  ready: boolean
+}
+
+/** Apps the shell has seen, so it can open one to show a link. */
+interface KnownApp {
+  url: string
+  name: string
+  handles: string[]
 }
 
 const $ = <T extends Element>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T
@@ -92,7 +110,10 @@ function renderAccounts() {
     li.title = `Switch every frame to ${a.handle}`
     const avatar = a.avatar ? Object.assign(document.createElement('img'), { src: a.avatar, alt: '' }) : el('span', 'avatar')
     const who = el('div', 'who')
-    who.append(text('div', a.displayName || a.handle), text('div', `@${a.handle}`, 'handle'))
+    const name = text('div', a.displayName || a.handle)
+    const unread = unreadTotals().get(a.did)
+    if (unread) name.append(' ', badge(unread, `${unread} unread across apps`))
+    who.append(name, text('div', `@${a.handle}`, 'handle'))
     const rm = Object.assign(document.createElement('button'), { textContent: '×', title: `Remove ${a.handle}` })
     rm.addEventListener('click', (e) => {
       e.stopPropagation()
@@ -109,7 +130,7 @@ function renderAccounts() {
 
 // ---- frames --------------------------------------------------------------
 
-function openFrame(url: string, restore: Did | null = null, id = crypto.randomUUID()) {
+function openFrame(url: string, restore: Did | null = null, id = crypto.randomUUID()): Frame {
   const tpl = $<HTMLTemplateElement>('#frame-tpl')
   const el = tpl.content.firstElementChild!.cloneNode(true) as HTMLElement
   const iframe = $<HTMLIFrameElement>('iframe', el)
@@ -124,12 +145,17 @@ function openFrame(url: string, restore: Did | null = null, id = crypto.randomUU
     active: null,
     pending: null,
     restore,
+    handles: [],
+    unread: new Map(),
+    queuedOpen: null,
+    ready: false,
   }
   iframe.src = url
   $<HTMLButtonElement>('.close', el).addEventListener('click', () => {
     frames.delete(id)
     el.remove()
     saveFrames()
+    renderAccounts()
   })
   $<HTMLSelectElement>('.account-select', el).addEventListener('change', (e) => {
     const did = (e.target as HTMLSelectElement).value as Did
@@ -140,10 +166,15 @@ function openFrame(url: string, restore: Did | null = null, id = crypto.randomUU
   $('#frames').append(el)
   renderFrame(frame)
   saveFrames()
+  return frame
 }
 
 function renderFrame(f: Frame) {
-  $<HTMLElement>('.app-name', f.el).textContent = f.appName
+  const name = $<HTMLElement>('.app-name', f.el)
+  name.textContent = f.appName
+  const shown = f.pending ?? f.active
+  const unread = shown ? f.unread.get(shown) : 0
+  if (unread) name.append(' ', badge(unread, `${unread} unread for this account`))
   const select = $<HTMLSelectElement>('.account-select', f.el)
   select.replaceChildren(
     Object.assign(document.createElement('option'), { value: '', textContent: 'Choose account…', disabled: true }),
@@ -173,6 +204,51 @@ function send(f: Frame, msg: ShellToApp) {
   f.iframe.contentWindow?.postMessage(msg, f.origin)
 }
 
+function unreadTotals() {
+  return unreadByAccount([...frames.values()].map((f) => ({ origin: f.origin, counts: f.unread })))
+}
+
+/**
+ * Show an `at://` link in the app that handles it: an open frame if there
+ * is one, else a new frame of an app seen before.
+ */
+function routeOpen(uri: AtUri, did: Did | undefined, from: Frame) {
+  const account = did && accounts.find((a) => a.did === did)
+  const msg: OpenMessage = {
+    proto: PROTO,
+    type: 'open',
+    uri,
+    ...(account ? { account: { did: account.did, handle: account.handle } } : {}),
+  }
+  let target = pickFrame(frames.values(), uri, did)
+  if (!target) {
+    const collection = collectionOf(uri)
+    const app = collection && knownApps().find((a) => handlesCollection(a.handles, collection))
+    if (!app) {
+      notice(`No app in this workspace opens ${collection ?? 'whole repos'}.`, from)
+      return
+    }
+    target = openFrame(app.url, did ?? null)
+  }
+  if (account && target.active !== account.did) target.pending = account.did
+  if (target.ready) send(target, msg)
+  else target.queuedOpen = msg
+  renderFrame(target)
+  if (target !== from) {
+    target.el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
+    target.el.classList.remove('flash')
+    void target.el.offsetWidth // restart the animation
+    target.el.classList.add('flash')
+  }
+}
+
+function notice(message: string, f: Frame) {
+  const n = $<HTMLElement>('.notice', f.el)
+  n.textContent = message
+  n.hidden = false
+  setTimeout(() => (n.hidden = true), 5000)
+}
+
 function switchFrame(f: Frame, a: Account) {
   f.pending = a.did
   send(f, { proto: PROTO, type: 'switch', account: { did: a.did, handle: a.handle } })
@@ -189,12 +265,19 @@ window.addEventListener('message', (event) => {
       frame.appName = msg.app.name
       frame.sessions = msg.sessions
       frame.active = msg.active
+      frame.handles = msg.handles ?? []
+      frame.ready = true
+      rememberApp({ url: frame.url, name: msg.app.name, handles: frame.handles })
       // Frames of one app share storage, so the app's own "active" is
       // whatever any frame picked last. Which account *this* frame shows is
       // the shell's to remember.
       const want = frame.restore && accounts.find((a) => a.did === frame.restore)
       frame.restore = null
       if (want && want.did !== msg.active && msg.sessions.includes(want.did)) switchFrame(frame, want)
+      if (frame.queuedOpen) {
+        send(frame, frame.queuedOpen)
+        frame.queuedOpen = null
+      }
       break
     }
     case 'state':
@@ -205,6 +288,13 @@ window.addEventListener('message', (event) => {
       break
     case 'needs-sign-in':
       frame.pending = msg.did
+      break
+    case 'unread':
+      frame.unread = new Map(msg.counts.filter((c) => c.count > 0).map((c) => [c.did, c.count]))
+      renderAccounts()
+      break
+    case 'open':
+      routeOpen(msg.uri, msg.did, frame)
       break
   }
   renderFrame(frame)
@@ -222,6 +312,31 @@ function saveFrames() {
   } catch {}
 }
 
+function knownApps(): KnownApp[] {
+  try {
+    const v = JSON.parse(localStorage.getItem('awp.apps') ?? '[]')
+    return Array.isArray(v) ? v.filter((a) => a && typeof a.url === 'string' && Array.isArray(a.handles)) : []
+  } catch {
+    return []
+  }
+}
+
+function rememberApp(app: KnownApp) {
+  const rest = knownApps().filter((a) => a.url !== app.url)
+  try {
+    localStorage.setItem('awp.apps', JSON.stringify([app, ...rest].slice(0, 50)))
+  } catch {}
+}
+
+/**
+ * The demo app run as two apps: one shows posts, one shows profiles, so
+ * links can travel between them.
+ */
+const DEFAULT_FRAMES: SavedFrame[] = [
+  { url: `${APP_ORIGIN}/?name=Posts&handles=app.bsky.feed.post`, did: null },
+  { url: `${APP_ORIGIN}/?name=Profiles&handles=app.bsky.actor.profile`, did: null },
+]
+
 function restoreFrames(): SavedFrame[] {
   try {
     const v = JSON.parse(localStorage.getItem('awp.frames') ?? 'null')
@@ -236,7 +351,7 @@ function restoreFrames(): SavedFrame[] {
       )
     }
   } catch {}
-  return [{ url: `${APP_ORIGIN}/`, did: null }]
+  return DEFAULT_FRAMES
 }
 
 // ---- helpers & boot ------------------------------------------------------
@@ -250,6 +365,11 @@ function text(tag: string, t: string, className?: string) {
   const e = el(tag, className)
   e.textContent = t
   return e
+}
+function badge(n: number, title: string) {
+  const b = text('span', n > 99 ? '99+' : String(n), 'badge')
+  b.title = title
+  return b
 }
 
 $<HTMLFormElement>('#add-account').addEventListener('submit', async (e) => {
