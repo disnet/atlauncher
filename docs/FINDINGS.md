@@ -76,10 +76,14 @@ other frame for the same account, then in the first again. All three
 should succeed. A failure means a frame used a refresh token the other had
 already rotated.
 
-- **Expected, real atproto sessions:** works. `@atproto/oauth-client-browser`
-  refreshes under a `navigator.locks` lock and reads the stored session
-  again inside it. Locks and IndexedDB are both per partition, so both
-  frames share them. Still to check in Chrome.
+- **Observed, real atproto sessions (Chrome, version not yet recorded,
+  2026-10-26, Tim):** works. Two frames on one account, refreshed in turn
+  (frame 1, frame 2, frame 1): each frame's "expires before" equals the
+  other frame's previous "expires after", and every authenticated call
+  succeeded. Each frame picks up the token the other just rotated, because
+  `@atproto/oauth-client-browser` refreshes under a `navigator.locks` lock
+  and reads the stored session again inside it. Locks and IndexedDB are
+  both per partition, so the frames share them.
 - **Seen in Playwright Chromium 153, mock PDS sessions:** one frame after
   the other worked. Clicking both at once failed in the second frame with
   `invalid_grant`, because the demo app's own mock client had no lock. The
