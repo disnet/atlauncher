@@ -13,5 +13,5 @@
     "verbatimModuleSyntax": false,
     "esModuleInterop": true
   },
-  "include": ["lib", "protocol", "shell", "app", "mock-pds", "scripts", "test"]
+  "include": ["lib", "protocol", "shell", "app", "mock-pds", "scripts", "test", "deploy"]
 }

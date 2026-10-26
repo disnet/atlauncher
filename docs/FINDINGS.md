@@ -130,6 +130,25 @@ shell.
   endpoint (the Phase 2 code exchange worked in Chromium 153, which needs
   them).
 
+## 5. Deployed on workers.dev
+
+Not deployed or checked yet (see docs/DEPLOY.md). What to look for:
+
+- **Expected:** the three parts are on separate `*.workers.dev` subdomains,
+  which are separate sites because `workers.dev` is on the Public Suffix
+  List. The framed app is partitioned as on localhost, and each IdP's
+  `/.well-known/web-identity` sits at its own site's root, so FedCM should
+  accept it without the well-known flag.
+- **Expected:** unlike localhost, the shell and the mock PDS are cross-site
+  from each other too. Neither frames the other, so nothing should change.
+- **Expected:** the deployed app is a web OAuth client, not a loopback one.
+  bsky.social fetches `https://<app>/oauth-client-metadata.json`, and
+  sign-in should work as locally, with the same COOP behavior as in §1.
+- **Expected:** the popup relay and the mock PDS keep their state in D1, so
+  a callback relayed by one Worker isolate is read by another, and codes
+  stay single-use and refresh tokens rotate across isolates. The HTTP tests
+  pass against the deploy build under `wrangler dev` with a local D1.
+
 ## Open questions for a real FedCM profile (Phase 2)
 
 - **Discovery:** an app can't hard-code every PDS's config URL. Options are

@@ -12,6 +12,7 @@ import { Agent } from '@atproto/api'
 import { BrowserOAuthClient, type OAuthSession } from '@atproto/oauth-client-browser'
 import { APP_ORIGIN, PDS_ORIGIN, SHELL_ORIGIN } from '../../lib/config.ts'
 import { parsePdsAssertion, parseShellAssertion, type Did } from '../../protocol/messages.ts'
+import { CLIENT_ID, IS_LOOPBACK, REDIRECT_URI, SCOPE, clientMetadata } from '../oauth-client.ts'
 import { dpopProof, generateDpopKey, pkcePair, type DpopKey } from './dpop.ts'
 import { idbDel, idbGet, idbSet } from './idb.ts'
 import { log } from './log.ts'
@@ -53,18 +54,18 @@ export const setActive = (did: Did | null) => (did ? idbSet(ACTIVE_KEY, did) : i
 
 // ---- Phase 1: real atproto OAuth -----------------------------------------
 
-export const REDIRECT_URI = `${APP_ORIGIN}/callback.html` as const
-const SCOPE = 'atproto transition:generic'
-// A loopback client_id: no hosted metadata needed for local development.
-const CLIENT_ID = `http://localhost?redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPE)}`
-
 let clientP: Promise<BrowserOAuthClient> | undefined
 export function oauthClient() {
-  clientP ??= BrowserOAuthClient.load({
-    clientId: CLIENT_ID,
-    handleResolver: 'https://bsky.social',
-    responseMode: 'query',
-  })
+  // Loopback locally; deployed, the metadata the app server publishes.
+  clientP ??= IS_LOOPBACK
+    ? BrowserOAuthClient.load({ clientId: CLIENT_ID, handleResolver: 'https://bsky.social', responseMode: 'query' })
+    : Promise.resolve(
+        new BrowserOAuthClient({
+          clientMetadata: clientMetadata(),
+          handleResolver: 'https://bsky.social',
+          responseMode: 'query',
+        }),
+      )
   return clientP
 }
 

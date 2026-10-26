@@ -3,3 +3,6 @@ dist/
 .data/
 *.log
 .DS_Store
+deploy/out/
+deploy/.wrangler-state/
+.wrangler/
