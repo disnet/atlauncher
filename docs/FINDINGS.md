@@ -52,6 +52,21 @@ site). Sessions added in one appear in the other after a reload, and the
 library's refresh locks coordinate across them. Open the demo app twice in
 the shell to check.
 
+**Observed (Chrome, version not yet recorded, 2026-10-26, Tim):** a second
+frame of the demo app lists every account signed in to the first, and each
+frame can switch between them. But after reloading the shell, both frames
+come back on whichever account was picked last, in either frame. The
+*active* account lives in the same shared IndexedDB as the sessions, so
+frames overwrite each other's choice. Which account a frame shows is
+per-frame state, and shared storage can't hold it. Refresh across frames
+is not checked yet.
+
+**Fix (expected to work, needs a re-check in Chrome):** the shell saves each
+frame's account and sends `switch` after the frame's `hello` (see
+PROTOCOL.md). In Playwright Chromium 153 with two mock accounts, frames set
+to Alice and Bob come back as Alice and Bob after a reload. Without the fix
+they both come back as Bob.
+
 ## 3. Sessions inside vs outside the shell
 
 **Expected:** signing in to the demo app at top level
@@ -59,6 +74,10 @@ the shell to check.
 sessions, because the framed copy's storage is keyed by the shell's site. To
 users that looks like being "logged out" in the shell. A real deployment would
 want the Storage Access API or a per-app explanation.
+
+**Observed (Chrome, version not yet recorded, 2026-10-26, Tim):** the demo
+app opened at top level shows none of the accounts signed in inside the
+shell.
 
 ## 4. FedCM in the frame
 
@@ -75,9 +94,10 @@ want the Storage Access API or a per-app explanation.
   the mock PDS's. Chrome allows one. Chromium 153 also warns that, when
   `client_metadata` is used, the well-known file must repeat
   `accounts_endpoint` and `login_url` (a hard requirement from Chrome 145).
-  **Fix (expected to work, needs a re-check in Chrome):** each IdP's
-  well-known names only its own config plus those two endpoints. With that,
-  both IdPs show the chooser from the frame in Chromium 153.
+  **Fix:** each IdP's well-known names only its own config plus those two
+  endpoints. **Observed working (Chrome, version not yet recorded,
+  2026-10-26, Tim):** the shell's chooser appears in the frame and the app
+  receives the account hint.
 - **Expected (from the Playwright run):** Chrome fetches the well-known
   file at `http://localhost:<port>/`, so the
   `fedcm-without-well-known-enforcement` flag may not be needed. Still to
