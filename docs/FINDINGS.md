@@ -30,6 +30,20 @@ one-time relay on the app's own server. The frame then calls
 To check: does the auth server's COOP sever `window.opener`? The event log
 shows "callback via postMessage" or "callback via server relay".
 
+**Observed (Chrome, version not yet recorded, 2026-10-26, Tim):** with
+bsky.social as the auth server, the frame's handle on the popup reported
+`closed === true` about two seconds after the popup was sent to the
+authorization URL, while the popup was still open and sign-in went on. The
+first version of the relay treated that as "Sign-in window closed" and gave
+up, so finishing sign-in in the popup did nothing. This fits COOP putting
+the popup in a new browsing context group, which also severs the opener.
+
+**Fix (expected to work, needs a re-check):** `waitForRelay` no longer
+trusts `popup.closed`. It logs "popup handle reports closed (COOP?)" once
+and keeps polling the relay until the 5-minute deadline. The cost: if the
+user really closes the popup, the frame waits out the deadline (another
+click starts a fresh sign-in).
+
 ## 2. Two frames of the same app
 
 **Expected:** both frames share one partition (same app origin, same top-level

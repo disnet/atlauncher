@@ -137,6 +137,7 @@ async function waitForRelay(key: string, popup: Window): Promise<URLSearchParams
   const deadline = Date.now() + 5 * 60_000
   // Also accept a direct postMessage, in case the opener link survived.
   let viaMessage: string | undefined
+  let closedLogged = false
   const onMessage = (e: MessageEvent) => {
     if (e.origin === APP_ORIGIN && e.data?.type === 'oauth-callback' && e.data.relay === key) {
       viaMessage = e.data.search
@@ -154,11 +155,13 @@ async function waitForRelay(key: string, popup: Window): Promise<URLSearchParams
         log('callback via server relay')
         return new URLSearchParams((await res.json()).search)
       }
-      if (popup.closed && res.status !== 200) {
-        // One last look: the popup may have relayed just before closing.
-        const last = await fetch(`/relay/${key}`, { cache: 'no-store' })
-        if (last.status === 200) return new URLSearchParams((await last.json()).search)
-        throw new Error('Sign-in window closed')
+      // Don't give up when the popup looks closed: once it navigates to an
+      // auth server that sends COOP, Chrome swaps its browsing context group
+      // and our handle reports closed=true while sign-in is still going on.
+      // The relay (or the deadline) is the only reliable signal.
+      if (popup.closed && !closedLogged) {
+        closedLogged = true
+        log('popup handle reports closed (COOP?); still waiting for relay')
       }
       await new Promise((r) => setTimeout(r, 700))
     }
