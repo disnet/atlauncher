@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Demo app</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <header class="top">
+      <strong>Demo app</strong>
+      <span id="busy" class="busy"></span>
+    </header>
+    <p id="context" class="context"></p>
+
+    <div id="error" class="error" hidden></div>
+
+    <section id="pending" class="pending" hidden>
+      <p>Sign in as <strong id="pending-handle"></strong> in this app?</p>
+      <div class="row">
+        <button id="pending-continue">Continue</button>
+        <button id="pending-dismiss" class="secondary">Not now</button>
+      </div>
+    </section>
+
+    <section id="profile" class="profile" hidden>
+      <img id="p-avatar" alt="" />
+      <div>
+        <div id="p-name" class="name"></div>
+        <div id="p-handle" class="muted"></div>
+        <div id="p-did" class="did"></div>
+        <p id="p-desc"></p>
+        <div id="p-stats" class="muted"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Accounts in this app</h2>
+      <ul id="sessions" class="sessions"></ul>
+    </section>
+
+    <section>
+      <h2>Add an account</h2>
+      <div class="row">
+        <button id="via-shell" hidden title="Phase 1: atworkplace names the account, then atproto OAuth signs in">
+          Choose from atworkplace
+        </button>
+        <button id="via-mock" class="alt" hidden title="Phase 2: a mock PDS is the FedCM IdP; no popup">
+          Mock PDS account (Phase 2)
+        </button>
+      </div>
+      <form id="by-handle" class="row">
+        <input name="handle" placeholder="or a handle, e.g. you.bsky.social" autocomplete="off" />
+        <button>Sign in</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>Event log</h2>
+      <pre id="log" class="log"></pre>
+    </section>
+
+    <script type="module" src="/dist/main.js"></script>
+  </body>
+</html>
